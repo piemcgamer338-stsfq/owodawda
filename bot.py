@@ -250,19 +250,71 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
     if not await require_game(ctx,amount): return
     crashed=Decimal(str(round(max(1.0,random.expovariate(1/2)),2))); won=crashed>=target; s,c,h=seed(); await finish(ctx,'Limbo',amount,won,target,f'Target: **{target:.2f}×** | Crashed: **{crashed:.2f}×**\n🔒 **Provably Fair**\nServer Seed: `{s}`\nClient Seed: `{c}`\nNonce: `{int(datetime.now().timestamp())}`',limbo_card(float(crashed)))
 
+class BlackjackView(discord.ui.View):
+    def __init__(self, ctx, amount, player, dealer):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+        self.amount = amount
+        self.player = player
+        self.dealer = dealer
+
+    @discord.ui.button(label='Hit', style=discord.ButtonStyle.primary)
+    async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ranks = list('23456789') + ['10', 'J', 'Q', 'K', 'A']
+        suits = ['S', 'H', 'D', 'C']
+
+        self.player.append(
+            (random.choice(ranks), random.choice(suits))
+        )
+
+        def value(hand):
+            vals = [
+                11 if a == 'A'
+                else 10 if a in 'JQK'
+                else int(a)
+                for a, _ in hand
+            ]
+
+            total = sum(vals)
+            aces = sum(a == 'A' for a, _ in hand)
+
+            while total > 21 and aces:
+                total -= 10
+                aces -= 1
+
+            return total
+
+        pv = value(self.player)
+
+        image = blackjack_card(
+            self.ctx.author.display_name,
+            self.player,
+            self.dealer
+        )
+
+        e = emb(
+            'Blackjack',
+            f'**Bet:** {money(self.amount)} points\n'
+            f'Your total: **{pv}**'
+        )
+
+        e.set_image(url=f'attachment://{image.name}')
+
+        await interaction.response.edit_message(
+            embed=e,
+            attachments=[discord.File(image)],
+            view=self
+        )
+
+    @discord.ui.button(label='Stand', style=discord.ButtonStyle.success)
+    async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            'Stand button works!',
+            ephemeral=True
+        )
+
 @bot.command(aliases=['bj'])
 async def blackjack(ctx, amount: Decimal, *sidebets):
-    if not await require_game(ctx,amount): return
-    ranks=list('23456789')+['10','J','Q','K','A']; suits=['S','H','D','C']
-    cards=[(random.choice(ranks),random.choice(suits)) for _ in range(4)]
-    def value(hand):
-        vals=[11 if a=='A' else 10 if a in 'JQK' else int(a) for a,_ in hand]; total=sum(vals); aces=sum(a=='A' for a,_ in hand)
-        while total>21 and aces: total-=10; aces-=1
-        return total
-    player,dealer=cards[:2],cards[2:]; pv,dv=value(player),value(dealer)
-    while dv<17: dealer.append((random.choice(ranks),random.choice(suits))); dv=value(dealer)
-    won=(pv<=21 and (dv>21 or pv>dv)); mult=Decimal('2') if pv==21 else Decimal('1.95')
-    await finish(ctx,'Blackjack',amount,won,mult,f'Your total: **{pv}** | Dealer total: **{dv}**\nSide bets: {", ".join(sidebets) if sidebets else "none"}',blackjack_card(ctx.author.display_name,player,dealer))
 
 @bot.command()
 async def hilo(ctx, amount: Decimal):
