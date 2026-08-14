@@ -1,5 +1,7 @@
 import asyncpg
 from datetime import datetime, timezone
+from decimal import Decimal
+import os
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -22,7 +24,26 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   ltc NUMERIC(20,8) NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deposited_points NUMERIC(20,4) NOT NULL DEFAULT 0;
+-- Add deposit_address column for watch-only deposit addresses
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_address TEXT;
+
+-- Table for tracking on-chain deposits discovered by the watcher
+CREATE TABLE IF NOT EXISTS deposits (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    txid TEXT NOT NULL UNIQUE,
+    address TEXT NOT NULL,
+    ltc NUMERIC(20,8) NOT NULL,
+    points NUMERIC(20,4) NOT NULL,
+    confirmations INT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    credited_at TIMESTAMPTZ
+);
 """
+
+# Rate used for LTC -> points conversion. Matches bot.RATE
+RATE = Decimal('0.0001')
 
 class Database:
     def __init__(self, url): self.url, self.pool = url, None
@@ -61,3 +82,55 @@ class Database:
             return (await c.fetchval("SELECT value FROM settings WHERE key='frozen'")) == '1'
     async def set_frozen(self, yes):
         async with self.pool.acquire() as c: await c.execute("INSERT INTO settings(key,value) VALUES('frozen',$1) ON CONFLICT(key) DO UPDATE SET value=$1", '1' if yes else '0')
+
+    async def record_deposit(self, user_id: int, txid: str, address: str, ltc_amount, confirmations: int = 0):
+        """
+        Record a detected on-chain deposit and credit the user's account once confirmations reach the required threshold.
+        This function is idempotent with respect to txid and will never credit the same txid twice.
+
+        Parameters:
+        - user_id: Discord user id
+        - txid: transaction id (unique)
+        - address: the watched address the funds arrived to
+        - ltc_amount: Decimal or numeric amount of LTC received
+        - confirmations: current confirmation count
+
+        Returns:
+        - dict with keys: inserted (bool), credited (bool), points (Decimal)
+        """
+        from decimal import Decimal
+        required = int(os.getenv('LTC_CONFIRMATIONS','6'))
+        ltc = Decimal(str(ltc_amount))
+        points = (ltc / RATE).quantize(Decimal('0.01'))
+        async with self.pool.acquire() as c:
+            async with c.transaction():
+                # Try to insert the deposit row. If txid already exists, do nothing.
+                try:
+                    await c.execute("INSERT INTO deposits(user_id,txid,address,ltc,points,confirmations,status) VALUES($1,$2,$3,$4,$5,$6,$7)",
+                                    user_id, txid, address, ltc, points, confirmations, 'pending')
+                except asyncpg.exceptions.UniqueViolationError:
+                    # Already recorded, fetch current status
+                    row = await c.fetchrow("SELECT status,confirmations,points FROM deposits WHERE txid=$1", txid)
+                    credited = row['status'] == 'confirmed'
+                    return {'inserted': False, 'credited': credited, 'points': row['points']}
+
+                credited = False
+                if confirmations >= required:
+                    # Atomically update the deposit to confirmed if not already confirmed
+                    updated = await c.fetchrow("UPDATE deposits SET confirmations=$2, status='confirmed', credited_at=$3 WHERE txid=$1 AND status!='confirmed' RETURNING id,points", txid, confirmations, datetime.now(timezone.utc))
+                    if updated:
+                        # Credit the user's account exactly once
+                        await self.credit_deposit(user_id, updated['points'])
+                        credited = True
+                else:
+                    # Update confirmations count
+                    await c.execute("UPDATE deposits SET confirmations=$2 WHERE txid=$1", txid, confirmations)
+
+                return {'inserted': True, 'credited': credited, 'points': points}
+
+    async def list_watched_addresses(self):
+        """
+        Return list of (user_id, deposit_address) for users that have a deposit_address assigned.
+        """
+        async with self.pool.acquire() as c:
+            return await c.fetch("SELECT user_id,deposit_address FROM users WHERE deposit_address IS NOT NULL")
