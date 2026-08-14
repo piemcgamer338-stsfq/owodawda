@@ -250,12 +250,12 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
     if not await require_game(ctx,amount): return
     crashed=Decimal(str(round(max(1.0,random.expovariate(1/2)),2))); won=crashed>=target; s,c,h=seed(); await finish(ctx,'Limbo',amount,won,target,f'Target: **{target:.2f}×** | Crashed: **{crashed:.2f}×**\n🔒 **Provably Fair**\nServer Seed: `{s}`\nClient Seed: `{c}`\nNonce: `{int(datetime.now().timestamp())}`',limbo_card(float(crashed)))
 
-        image = blackjack_card(
-            self.ctx.author.display_name,
-            self.player,
-            self.dealer
-        )
-
+      class BlackjackView(discord.ui.View):
+    def __init__(self, ctx, amount, player, dealer):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+        self.amount = amount
+        
         e = emb(
             'Blackjack',
             f'**Bet:** {money(self.amount)} points\n'
