@@ -258,7 +258,7 @@ class BlackjackView(discord.ui.View):
         self.player = player
         self.dealer = dealer
 
-        async def interaction_check(self, interaction: discord.Interaction):
+    async def interaction_check(self, interaction: discord.Interaction):
         if interaction.user.id != self.ctx.author.id:
             await interaction.response.send_message(
                 'Only the player who started this Blackjack game can use these buttons.',
