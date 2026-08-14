@@ -146,7 +146,7 @@ async def deposit(ctx):
                         bip_obj = Bip44.FromExtendedKey(xpub, Bip44Coins.LITECOIN)
                         address = bip_obj.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
                     except Exception:
-                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (xpub).', RED))
+                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (xpu[...]
 
                     await conn.execute("UPDATE users SET deposit_address=$2, deposit_index=deposit_index+1 WHERE user_id=$1", ctx.author.id, address)
 
