@@ -356,8 +356,8 @@ class BlackjackView(discord.ui.View):
             view=self
         )
         
-  @discord.ui.button(label='Stand', style=discord.ButtonStyle.success)
-async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
+      @discord.ui.button(label='Stand', style=discord.ButtonStyle.success)
+    async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
     def value(hand):
         vals = [
             11 if a == 'A'
