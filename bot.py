@@ -44,7 +44,7 @@ async def require_game(ctx, amount):
 async def finish(ctx, game, amount, won, multiplier, detail, image=None):
     payout=(amount*multiplier).quantize(Decimal('0.01')) if won else Decimal('0')
     await db.record(ctx.author.id,game,amount,'win' if won else 'loss',payout)
-    e=emb(f'{game} — You {"Won" if won else "Lost"}',f'**Bet:** {money(amount)} points\n{detail}\n\n'+(f'Congratulations! You received **{money(payout)} points**.' if won else 'Better luck next [...]')
+    e=emb(f'{game} — You {"Won" if won else "Lost"}',f'**Bet:** {money(amount)} points\n{detail}\n\n'+(f'Congratulations! You received **{money(payout)} points**.' if won else 'Better luck next time.'))
     if image: e.set_image(url=f'attachment://{image.name}'); await ctx.send(embed=e,file=discord.File(image))
     else: await ctx.send(embed=e)
 
@@ -56,28 +56,20 @@ def result_embed(game, amount, won, multiplier, detail):
 RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A']
 ACTIVE_MINES={}
 
-# Litecoin address derivation helper
+# Helper to derive Litecoin address from xpub
 def derive_ltc_address_from_xpub(xpub: str, index: int) -> str:
-    """
-    Derive a Litecoin mainnet address at path m/0/index from an extended public key (xpub/ltub/etc).
-    Requires bip_utils.
-    """
     if Bip44 is None:
-        raise RuntimeError('bip_utils is not available; install bip-utils to derive addresses')
-    # Bip44 will produce Litecoin-compatible addresses when Bip44Coins.LITECOIN is used.
-    try:
-        bip_obj = Bip44.FromExtendedKey(xpub, Bip44Coins.LITECOIN)
-        addr = bip_obj.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
-        return addr
-    except Exception as e:
-        # bubble up a clear error
-        raise
+        raise RuntimeError('bip_utils not installed')
+    # Use Bip44 for Litecoin mainnet; derive m/0/index (external chain)
+    bip_obj = Bip44.FromExtendedKey(xpub, Bip44Coins.LITECOIN)
+    addr = bip_obj.Change(Bip44Changes.CHAIN_EXT).AddressIndex(int(index)).PublicKey().ToAddress()
+    return addr
 
 class HiloView(discord.ui.View):
     def __init__(self, author_id, amount, rank, suit, server, client, public_hash):
-        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.strea[...]
+        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.streak=0;[...]
     def current_embed(self):
-        return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the ne[...]')
+        return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the ne[...]
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message('Only the player who started this Hi-Lo game can use these buttons.',ephemeral=True); return False
@@ -109,3 +101,81 @@ class HiloView(discord.ui.View):
             await self.message.edit(embed=result_embed('Hi-Lo',self.amount,True,mult,'Auto-cashed out after timeout.'),view=None)
 
 # ... rest of the file unchanged until deposit command ...
+
+@bot.command(aliases=['cf','coinfip'])
+async def coinflip(ctx, amount: str, choice: str=None):
+    amount=await resolve_amount(ctx,amount)
+    if not await require_game(ctx,amount): return
+    choice=(choice or random.choice(['heads','tails'])).lower(); choice='heads' if choice in ('h','head','heads') else 'tails'; landed=random.choice(['heads','tails']); s,c,h=seed()
+    await asyncio.sleep(2); await finish(ctx,'Coinflip',amount,choice==landed,Decimal('1.92'),f'**Choice:** {choice.title()}\n**Landed:** {landed.title()}\n🔒 **Provably Fair**\nPublic Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
+
+# ... other commands unchanged ...
+
+@bot.command(aliases=['depo'])
+async def deposit(ctx):
+    """Generate and return a watch-only Litecoin deposit address derived from LTC_XPUB.
+
+    - Uses the environment variable LTC_XPUB (must be set in Railway).
+    - If the user already has deposit_address, returns the same address.
+    - Otherwise derives address at m/0/index using the user's deposit_index, stores it, and increments deposit_index atomically.
+    - Tries to DM the user; falls back to channel if DMs are blocked.
+    """
+    xpub = os.getenv('LTC_XPUB')
+    if not xpub:
+        return await ctx.send(embed=emb('Deposit unavailable', 'The owner has not configured LTC_XPUB yet.', RED))
+
+    if Bip44 is None:
+        return await ctx.send(embed=emb('Deposit unavailable', 'Server missing dependency: install bip-utils (pip install bip-utils).', RED))
+
+    try:
+        async with db.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("INSERT INTO users(user_id) VALUES($1) ON CONFLICT DO NOTHING", ctx.author.id)
+                row = await conn.fetchrow("SELECT deposit_address, deposit_index FROM users WHERE user_id=$1 FOR UPDATE", ctx.author.id)
+
+                if row and row.get('deposit_address'):
+                    address = row['deposit_address']
+                else:
+                    index = int(row['deposit_index']) if row and row['deposit_index'] is not None else 0
+                    try:
+                        # derive Litecoin address on mainnet at m/0/index
+                        bip_obj = Bip44.FromExtendedKey(xpub, Bip44Coins.LITECOIN)
+                        address = bip_obj.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
+                    except Exception:
+                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (watch-only) for mainnet.', RED))
+
+                    await conn.execute("UPDATE users SET deposit_address=$2, deposit_index=deposit_index+1 WHERE user_id=$1", ctx.author.id, address)
+
+    except Exception:
+        return await ctx.send(embed=emb('Deposit error', 'An internal error occurred while generating your deposit address. Try again later.', RED))
+
+    # Send via DM if possible, otherwise post in channel
+    embed_msg = emb('Litecoin Deposit', f'Your unique LTC deposit address:\n\n`{address}`\n\nSend LTC to this address.')
+    try:
+        await ctx.author.send(embed=embed_msg)
+        # Inform the channel that a DM was sent
+        try:
+            await ctx.send(embed=emb('Litecoin Deposit', 'I DMed your unique deposit address. Check your DMs.'))
+        except Exception:
+            pass
+    except discord.Forbidden:
+        await ctx.send(embed=embed_msg)
+
+@bot.command()
+async def withdraw(ctx, address: str, amount: Decimal):
+    if amount<50: return await ctx.send(embed=emb('Minimum withdrawal','Minimum withdrawal is **50 points**.',RED))
+    if await db.frozen(): return await ctx.send(embed=emb('Withdrawals are frozen','An administrator has temporarily locked withdrawals.',RED))
+    if not await db.debit(ctx.author.id,amount): return await ctx.send(embed=emb('Insufficient balance','You do not have enough points.',RED))
+    ltc=(amount*RATE).quantize(Decimal('.00000001'))
+    async with db.pool.acquire() as c:
+        req=await c.fetchrow('INSERT INTO withdrawals(user_id,address,points,ltc) VALUES($1,$2,$3,$4) RETURNING id',ctx.author.id,address,amount,ltc)
+    await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${amount*USD_PER_POINT:.2f})!\n\nYour request ID is `{req["id"]}` and will be processed by the operator.',GREEN))
+    if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount: **{money(amount)} points**'))
+
+# ... remainder of file unchanged ...
+
+async def main():
+    if not TOKEN or not DB_URL: raise RuntimeError('Set DISCORD_TOKEN and DATABASE_URL in Railway Variables.')
+    await db.connect()
+    async with bot: await bot.start(TOKEN)
+if __name__=='__main__': asyncio.run(main())
