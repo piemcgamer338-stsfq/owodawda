@@ -67,9 +67,9 @@ def derive_ltc_address_from_xpub(xpub: str, index: int) -> str:
 
 class HiloView(discord.ui.View):
     def __init__(self, author_id, amount, rank, suit, server, client, public_hash):
-        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.streak=0;[...]
+        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.strea[...]
     def current_embed(self):
-        return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the ne[...]
+        return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the ne[...]')
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message('Only the player who started this Hi-Lo game can use these buttons.',ephemeral=True); return False
@@ -107,7 +107,7 @@ async def coinflip(ctx, amount: str, choice: str=None):
     amount=await resolve_amount(ctx,amount)
     if not await require_game(ctx,amount): return
     choice=(choice or random.choice(['heads','tails'])).lower(); choice='heads' if choice in ('h','head','heads') else 'tails'; landed=random.choice(['heads','tails']); s,c,h=seed()
-    await asyncio.sleep(2); await finish(ctx,'Coinflip',amount,choice==landed,Decimal('1.92'),f'**Choice:** {choice.title()}\n**Landed:** {landed.title()}\n🔒 **Provably Fair**\nPublic Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
+    await asyncio.sleep(2); await finish(ctx,'Coinflip',amount,choice==landed,Decimal('1.92'),f'**Choice:** {choice.title()}\n**Landed:** {landed.title()}\n🔒 **Provably Fair**\nPublic Hash: `{[...]
 
 # ... other commands unchanged ...
 
@@ -142,7 +142,7 @@ async def deposit(ctx):
                         bip_obj = Bip44.FromExtendedKey(xpub, Bip44Coins.LITECOIN)
                         address = bip_obj.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
                     except Exception:
-                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (watch-only) for mainnet.', RED))
+                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (wat[...]
 
                     await conn.execute("UPDATE users SET deposit_address=$2, deposit_index=deposit_index+1 WHERE user_id=$1", ctx.author.id, address)
 
@@ -169,8 +169,8 @@ async def withdraw(ctx, address: str, amount: Decimal):
     ltc=(amount*RATE).quantize(Decimal('.00000001'))
     async with db.pool.acquire() as c:
         req=await c.fetchrow('INSERT INTO withdrawals(user_id,address,points,ltc) VALUES($1,$2,$3,$4) RETURNING id',ctx.author.id,address,amount,ltc)
-    await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${amount*USD_PER_POINT:.2f})!\n\nYour request ID is `{req["id"]}` and will be processed by the operator.',GREEN))
-    if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount: **{money(amount)} points**'))
+    await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${amount*USD_PER_POINT:.2f})!\n\nY[...]
+    if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount[...]
 
 # ... remainder of file unchanged ...
 
