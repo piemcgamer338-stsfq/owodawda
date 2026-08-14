@@ -335,7 +335,7 @@ class BlackjackView(discord.ui.View):
             self.dealer
         )
 
-        image = blackjack_card(
+               image = blackjack_card(
             self.ctx.author.display_name,
             self.player,
             self.dealer
@@ -355,24 +355,98 @@ class BlackjackView(discord.ui.View):
             attachments=[discord.File(image)],
             view=self
         )
-        
-      @discord.ui.button(label='Stand', style=discord.ButtonStyle.success)
+
+    @discord.ui.button(label='Stand', style=discord.ButtonStyle.success)
     async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
-    def value(hand):
-        vals = [
-            11 if a == 'A'
-            else 10 if a in 'JQK'
-            else int(a)
-            for a, _ in hand
-        ]
-        total = sum(vals)
-        aces = sum(a == 'A' for a, _ in hand)
+        def value(hand):
+            vals = [
+                11 if a == 'A'
+                else 10 if a in 'JQK'
+                else int(a)
+                for a, _ in hand
+            ]
 
-        while total > 21 and aces:
-            total -= 10
-            aces -= 1
+            total = sum(vals)
+            aces = sum(a == 'A' for a, _ in hand)
 
-        return total
+            while total > 21 and aces:
+                total -= 10
+                aces -= 1
+
+            return total
+
+        pv = value(self.player)
+        dv = value(self.dealer)
+
+        while dv < 17:
+            ranks = list('23456789') + ['10', 'J', 'Q', 'K', 'A']
+            suits = ['S', 'H', 'D', 'C']
+            self.dealer.append(
+                (random.choice(ranks), random.choice(suits))
+            )
+            dv = value(self.dealer)
+
+        if pv > 21:
+            won = False
+        elif dv > 21 or pv > dv:
+            won = True
+        elif pv == dv:
+            won = None
+        else:
+            won = False
+
+        if won is True:
+            payout = (self.amount * Decimal('1.95')).quantize(Decimal('0.01'))
+            await db.record(
+                self.ctx.author.id,
+                'Blackjack',
+                self.amount,
+                'win',
+                payout
+            )
+            title = 'Blackjack - You Won'
+            colour = GREEN
+            result = f'You won **{money(payout)} points**!'
+        elif won is None:
+            payout = self.amount
+            await db.balance(self.ctx.author.id, payout)
+            title = 'Blackjack - Push'
+            colour = NAVY
+            result = f'Your **{money(payout)} points** bet was refunded.'
+        else:
+            await db.record(
+                self.ctx.author.id,
+                'Blackjack',
+                self.amount,
+                'loss',
+                Decimal('0')
+            )
+            title = 'Blackjack - You Lost'
+            colour = RED
+            result = 'Better luck next time.'
+
+        image = blackjack_card(
+            self.ctx.author.display_name,
+            self.player,
+            self.dealer
+        )
+
+        e = emb(
+            title,
+            f'**Bet:** {money(self.amount)} points\n'
+            f'Your total: **{pv}**\n'
+            f'Dealer total: **{dv}**\n\n'
+            f'{result}',
+            colour
+        )
+
+        e.set_image(url=f'attachment://{image.name}')
+
+        await interaction.response.edit_message(
+            embed=e,
+            attachments=[discord.File(image)],
+            view=None
+        )
 
     while value(self.dealer) < 17:
         ranks = list('23456789') + ['10', 'J', 'Q', 'K', 'A']
