@@ -360,445 +360,7 @@ async def ttt(ctx, member: discord.Member, amount: Decimal):
     winner=random.choice([ctx.author,member]); await db.balance(winner.id,amount*2)
     await ctx.send(embed=emb('Tic-Tac-Toe',f'🎮 {ctx.author.mention} (❌) vs {member.mention} (⭕)\nWinner: {winner.mention}\nPrize: **{money(amount*2)} points**',GREEN))
 
-@bot.command()
-async def word(ctx, amount: Decimal, member: discord.Member):
-    # -----------------------------
-    # BASIC VALIDATION
-    # -----------------------------
-    if member.bot or member == ctx.author:
-        return await ctx.send(
-            embed=emb(
-                'Invalid opponent',
-                'You need to challenge another player.',
-                RED
-            )
-        )
 
-    if amount <= 0:
-        return await ctx.send(
-            embed=emb(
-                'Invalid bet',
-                'Bet amount must be greater than zero.',
-                RED
-            )
-        )
-
-    host = await db.user(ctx.author.id)
-    guest = await db.user(member.id)
-
-    if Decimal(host['balance']) < amount:
-        return await ctx.send(
-            embed=emb(
-                'Insufficient balance',
-                f'You need **{money(amount)} points** to play.',
-                RED
-            )
-        )
-
-    if Decimal(guest['balance']) < amount:
-        return await ctx.send(
-            embed=emb(
-                'Insufficient balance',
-                f'{member.mention} does not have enough points.',
-                RED
-            )
-        )
-
-    # Random 3-letter starting fragment
-    fragment = random.choice([
-        'alp', 'bra', 'car', 'cha', 'con',
-        'dra', 'ele', 'for', 'pla', 'sta',
-        'str', 'tra', 'win', 'wor'
-    ])
-
-    # -----------------------------
-    # ACCEPT / DECLINE VIEW
-    # -----------------------------
-    class WordInviteView(discord.ui.View):
-
-        def __init__(self):
-            super().__init__(timeout=60)
-            self.message = None
-            self.accepted = False
-
-        async def interaction_check(self, interaction):
-            if interaction.user.id != member.id:
-                await interaction.response.send_message(
-                    'Only the challenged player can accept or decline.',
-                    ephemeral=True
-                )
-                return False
-
-            return True
-
-        @discord.ui.button(
-            label='Accept',
-            style=discord.ButtonStyle.success
-        )
-        async def accept(self, interaction, button):
-
-            if self.accepted:
-                return
-
-            self.accepted = True
-
-            # -----------------------------
-            # CHARGE HOST
-            # -----------------------------
-            if not await db.debit(ctx.author.id, amount):
-                return await interaction.response.edit_message(
-                    embed=emb(
-                        'Challenge Cancelled',
-                        'The challenger no longer has enough points.',
-                        RED
-                    ),
-                    view=None
-                )
-
-            # -----------------------------
-            # CHARGE GUEST
-            # -----------------------------
-            if not await db.debit(member.id, amount):
-
-                # Refund host if guest cannot pay
-                await db.balance(ctx.author.id, amount)
-
-                return await interaction.response.edit_message(
-                    embed=emb(
-                        'Challenge Cancelled',
-                        'The other player could not be charged.\n\n'
-                        'The challenger was refunded.',
-                        RED
-                    ),
-                    view=None
-                )
-
-            # -----------------------------
-            # REVEALING SCREEN
-            # -----------------------------
-            await interaction.response.edit_message(
-                embed=emb(
-                    'Word Revealing',
-                    f'{ctx.author.mention} vs {member.mention}\n\n'
-                    'The word challenge is starting...\n\n'
-                    'Get ready!'
-                ),
-                view=None
-            )
-
-            await asyncio.sleep(3)
-
-            # -----------------------------
-            # GAME EMBED
-            # -----------------------------
-            game_embed = emb(
-                'Word Challenge',
-                f'# {fragment.title()}\n\n'
-                '**Guess the word!**\n\n'
-                f'Only {ctx.author.mention} and {member.mention} '
-                'can participate.\n\n'
-                f'The word must start with **{fragment.title()}**.\n\n'
-                'There is **no time limit**. Keep guessing until '
-                'someone gets a correct English word.'
-            )
-
-            await interaction.message.edit(
-                embed=game_embed,
-                view=None
-            )
-
-            # -----------------------------
-            # ONLY THESE TWO PLAYERS
-            # -----------------------------
-            players = {
-                ctx.author.id,
-                member.id
-            }
-
-            # Prevent double settlement
-            game_finished = False
-
-            # -----------------------------
-            # MESSAGE CHECK
-            # -----------------------------
-            def check(message):
-                return (
-                    message.channel.id == ctx.channel.id
-                    and message.author.id in players
-                    and not message.author.bot
-                )
-
-            # -----------------------------
-            # UNLIMITED GUESS LOOP
-            # -----------------------------
-            while not game_finished:
-
-                try:
-                    guess_msg = await bot.wait_for(
-                        'message',
-                        check=check
-                    )
-                except asyncio.CancelledError:
-                    return
-                except Exception as e:
-                    print(f'Word game wait error: {e}')
-                    continue
-
-                guess = guess_msg.content.strip().lower()
-
-                # -----------------------------
-                # EMPTY / NON-LETTER GUESS
-                # -----------------------------
-                if not guess or not guess.isalpha():
-                    try:
-                        await guess_msg.add_reaction('❌')
-                    except Exception:
-                        pass
-
-                    continue
-
-                # -----------------------------
-                # WRONG STARTING LETTERS
-                # -----------------------------
-                if not guess.startswith(fragment):
-                    try:
-                        await guess_msg.add_reaction('❌')
-                    except Exception:
-                        pass
-
-                    continue
-
-                # -----------------------------
-                # OPENAI API KEY
-                # -----------------------------
-                api_key = os.getenv('OPENAI_API_KEY')
-
-                if not api_key:
-                    print('OPENAI_API_KEY is missing.')
-
-                    try:
-                        await guess_msg.add_reaction('❌')
-                    except Exception:
-                        pass
-
-                    continue
-
-                # -----------------------------
-                # ASK OPENAI
-                # -----------------------------
-                prompt = f"""
-Determine whether "{guess}" is a valid English word.
-
-Requirements:
-- It must be an actual English dictionary word.
-- It must start with "{fragment}".
-- Common English words are allowed.
-- Do not accept names.
-- Do not accept usernames.
-- Do not accept abbreviations.
-- Do not accept slang unless it is commonly recognized as an English word.
-- Do not accept random strings.
-- Do not accept misspellings.
-
-Reply with exactly one word:
-
-YES
-
-or
-
-NO
-"""
-
-                payload = {
-                    "model": "gpt-5-mini",
-                    "input": prompt
-                }
-
-                request = urllib.request.Request(
-                    "https://api.openai.com/v1/responses",
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    method="POST"
-                )
-
-                # -----------------------------
-                # CALL OPENAI
-                # -----------------------------
-                try:
-
-                    response = await asyncio.to_thread(
-                        urllib.request.urlopen,
-                        request,
-                        timeout=15
-                    )
-
-                    raw = response.read().decode("utf-8")
-                    result = json.loads(raw)
-
-                    answer = ""
-
-                    # Responses API output parsing
-                    for output in result.get("output", []):
-                        for content in output.get("content", []):
-
-                            if content.get("type") == "output_text":
-                                answer += content.get("text", "")
-
-                    answer = answer.strip().upper()
-
-                    valid = answer.startswith("YES")
-
-                except Exception as e:
-
-                    print(
-                        f'Word AI validation failed: {e}'
-                    )
-
-                    # API failed → don't punish the player
-                    # Just ignore this guess.
-                    continue
-
-                # -----------------------------
-                # WRONG WORD
-                # -----------------------------
-                if not valid:
-
-                    try:
-                        await guess_msg.add_reaction('❌')
-                    except Exception:
-                        pass
-
-                    continue
-
-                # -----------------------------
-                # CORRECT WORD
-                # -----------------------------
-                game_finished = True
-
-                winner = guess_msg.author.id
-
-                if winner == ctx.author.id:
-                    loser = member.id
-                else:
-                    loser = ctx.author.id
-
-                payout = (
-                    amount * Decimal('2')
-                ).quantize(Decimal('0.01'))
-
-                # -----------------------------
-                # PAY WINNER
-                # -----------------------------
-                await db.balance(
-                    winner,
-                    payout
-                )
-
-                # -----------------------------
-                # RECORD WIN
-                # -----------------------------
-                await db.record(
-                    winner,
-                    'Word',
-                    amount,
-                    'win',
-                    payout
-                )
-
-                # -----------------------------
-                # RECORD LOSS
-                # -----------------------------
-                await db.record(
-                    loser,
-                    'Word',
-                    amount,
-                    'loss',
-                    Decimal('0')
-                )
-
-                # -----------------------------
-                # CORRECT REACTION
-                # -----------------------------
-                try:
-                    await guess_msg.add_reaction('✅')
-                except Exception:
-                    pass
-
-                # -----------------------------
-                # FINAL RESULT
-                # -----------------------------
-                return await interaction.message.edit(
-                    embed=emb(
-                        'Word Challenge — Winner!',
-                        f'🏆 <@{winner}> won!\n\n'
-                        f'**Correct Word:** `{guess}`\n'
-                        f'**Required:** `{fragment.title()}`\n\n'
-                        f'Prize: **{money(payout)} points**',
-                        GREEN
-                    ),
-                    view=None
-                )
-
-        # -----------------------------
-        # DECLINE
-        # -----------------------------
-        @discord.ui.button(
-            label='Decline',
-            style=discord.ButtonStyle.danger
-        )
-        async def decline(self, interaction, button):
-
-            await interaction.response.edit_message(
-                embed=emb(
-                    'Word Challenge Declined',
-                    f'{member.mention} declined the challenge.\n\n'
-                    'No points were deducted.',
-                    RED
-                ),
-                view=None
-            )
-
-        # -----------------------------
-        # INVITE TIMEOUT
-        # -----------------------------
-        async def on_timeout(self):
-
-            if self.message:
-
-                try:
-                    await self.message.edit(
-                        embed=emb(
-                            'Word Challenge Expired',
-                            'The challenge expired.\n\n'
-                            'No points were deducted.',
-                            RED
-                        ),
-                        view=None
-                    )
-
-                except Exception:
-                    pass
-
-    # -----------------------------
-    # SEND CHALLENGE
-    # -----------------------------
-    view = WordInviteView()
-
-    message = await ctx.send(
-        embed=emb(
-            'Word Challenge',
-            f'{ctx.author.mention} challenged '
-            f'{member.mention} for **{money(amount)} points**!\n\n'
-            f'{member.mention}, do you accept?\n\n'
-            'You have **60 seconds** to accept or decline.'
-        ),
-        view=view
-    )
-
-    view.message = message
 
 @bot.command(aliases=['lb'])
 async def leaderboard(ctx):
@@ -977,6 +539,473 @@ async def ttt(ctx, member: discord.Member, amount: Decimal):
     if member.bot or member==ctx.author or amount<=0: return await ctx.send(embed=emb('Invalid challenge','Choose another member and a positive bet.',RED))
     host=await db.user(ctx.author.id); guest=await db.user(member.id); view=DuelInviteView(ctx.author.id,member.id,amount,'Tic-Tac-Toe')
     message=await ctx.send(embed=emb('Tic-Tac-Toe Challenge',f'{ctx.author.mention} challenged {member.mention} for **{money(amount)} points**.\n\n**Current balances:**\n{ctx.author.mention}: **{money(host["balance"])}** points\n{member.mention}: **{money(guest["balance"])}** points\n\n{member.mention}, accept or decline within 60 seconds.'),view=view); view.message=message
+
+# Word Command Replacement
+
+```python
+@bot.command()
+async def word(ctx, amount: Decimal, member: discord.Member):
+
+    # -----------------------------
+    # BASIC VALIDATION
+    # -----------------------------
+    if member.bot or member == ctx.author:
+        return await ctx.send(
+            embed=emb(
+                'Invalid opponent',
+                'You need to challenge another player.',
+                RED
+            )
+        )
+
+    if amount <= 0:
+        return await ctx.send(
+            embed=emb(
+                'Invalid bet',
+                'Bet amount must be greater than zero.',
+                RED
+            )
+        )
+
+    host = await db.user(ctx.author.id)
+    guest = await db.user(member.id)
+
+    if Decimal(host['balance']) < amount:
+        return await ctx.send(
+            embed=emb(
+                'Insufficient balance',
+                f'You need **{money(amount)} points** to play.',
+                RED
+            )
+        )
+
+    if Decimal(guest['balance']) < amount:
+        return await ctx.send(
+            embed=emb(
+                'Insufficient balance',
+                f'{member.mention} does not have enough points.',
+                RED
+            )
+        )
+
+    # -----------------------------
+    # RANDOM WORD START
+    # -----------------------------
+    fragment = random.choice([
+        'alp', 'bra', 'car', 'cha', 'con',
+        'dra', 'ele', 'for', 'pla', 'sta',
+        'str', 'tra', 'win', 'wor'
+    ])
+
+    # -----------------------------
+    # WORD INVITE
+    # -----------------------------
+    class WordInviteView(discord.ui.View):
+
+        def __init__(self):
+            super().__init__(timeout=60)
+
+            self.message = None
+            self.accepted = False
+            self.finished = False
+
+        async def interaction_check(self, interaction):
+
+            if interaction.user.id != member.id:
+
+                await interaction.response.send_message(
+                    'Only the challenged player can accept or decline.',
+                    ephemeral=True
+                )
+
+                return False
+
+            return True
+
+        # -----------------------------
+        # ACCEPT
+        # -----------------------------
+        @discord.ui.button(
+            label='Accept',
+            style=discord.ButtonStyle.success
+        )
+        async def accept(self, interaction, button):
+
+            if self.accepted or self.finished:
+                return await interaction.response.send_message(
+                    'This challenge has already been handled.',
+                    ephemeral=True
+                )
+
+            self.accepted = True
+
+            # IMPORTANT:
+            # Stops the 60-second invite timeout.
+            self.stop()
+
+            # -----------------------------
+            # CHARGE HOST
+            # -----------------------------
+            if not await db.debit(
+                ctx.author.id,
+                amount
+            ):
+
+                self.finished = True
+
+                return await interaction.response.edit_message(
+                    embed=emb(
+                        'Challenge Cancelled',
+                        'The challenger no longer has enough points.',
+                        RED
+                    ),
+                    view=None
+                )
+
+            # -----------------------------
+            # CHARGE GUEST
+            # -----------------------------
+            if not await db.debit(
+                member.id,
+                amount
+            ):
+
+                await db.balance(
+                    ctx.author.id,
+                    amount
+                )
+
+                self.finished = True
+
+                return await interaction.response.edit_message(
+                    embed=emb(
+                        'Challenge Cancelled',
+                        'The other player could not be charged.\n\n'
+                        'The challenger was refunded.',
+                        RED
+                    ),
+                    view=None
+                )
+
+            # -----------------------------
+            # WORD REVEALING
+            # -----------------------------
+            await interaction.response.edit_message(
+                embed=emb(
+                    'Word Revealing',
+                    f'{ctx.author.mention} vs '
+                    f'{member.mention}\n\n'
+                    'Get ready...'
+                ),
+                view=None
+            )
+
+            await asyncio.sleep(3)
+
+            # -----------------------------
+            # SHOW THE WORD START
+            # -----------------------------
+            await interaction.message.edit(
+                embed=emb(
+                    'Word Challenge',
+                    f'# {fragment.title()}\n\n'
+                    '**Guess the word!**\n\n'
+                    f'Only {ctx.author.mention} and '
+                    f'{member.mention} can participate.\n\n'
+                    f'The word must start with '
+                    f'**{fragment.title()}**.\n\n'
+                    '**Unlimited guesses until someone wins.**'
+                ),
+                view=None
+            )
+
+            # -----------------------------
+            # ONLY THE TWO PLAYERS
+            # -----------------------------
+            players = {
+                ctx.author.id,
+                member.id
+            }
+
+            # -----------------------------
+            # CHECK MESSAGES
+            # -----------------------------
+            def check(message):
+
+                return (
+                    message.channel.id == ctx.channel.id
+                    and message.author.id in players
+                    and not message.author.bot
+                )
+
+            # -----------------------------
+            # UNLIMITED GUESS LOOP
+            # -----------------------------
+            while not self.finished:
+
+                try:
+
+                    guess_msg = await bot.wait_for(
+                        'message',
+                        check=check
+                    )
+
+                except asyncio.CancelledError:
+                    return
+
+                except Exception as e:
+
+                    print(
+                        f'Word game message error: {e}'
+                    )
+
+                    continue
+
+                guess = (
+                    guess_msg.content
+                    .strip()
+                    .lower()
+                )
+
+                # -----------------------------
+                # ONLY LETTERS
+                # -----------------------------
+                if not guess or not guess.isalpha():
+
+                    try:
+                        await guess_msg.add_reaction('❌')
+                    except Exception:
+                        pass
+
+                    continue
+
+                # -----------------------------
+                # MUST START WITH FRAGMENT
+                # -----------------------------
+                if not guess.startswith(fragment):
+
+                    try:
+                        await guess_msg.add_reaction('❌')
+                    except Exception:
+                        pass
+
+                    continue
+
+                # -----------------------------
+                # GET OPENAI KEY
+                # -----------------------------
+                api_key = os.getenv(
+                    'OPENAI_API_KEY'
+                )
+
+                if not api_key:
+
+                    print(
+                        'OPENAI_API_KEY is missing.'
+                    )
+
+                    try:
+                        await guess_msg.add_reaction('❌')
+                    except Exception:
+                        pass
+
+                    continue
+
+                # -----------------------------
+                # ASK AI IF WORD IS VALID
+                # -----------------------------
+                prompt = (
+                    f'Is "{guess}" a real English dictionary word that '
+                    f'starts with "{fragment}"?\n\n'
+                    'Reply with ONLY YES or NO.\n'
+                    'Accept common English words.\n'
+                    'Reject names, usernames, abbreviations, '
+                    'random strings, and misspellings.'
+                )
+
+                payload = {
+                    'model': 'gpt-5-mini',
+                    'input': prompt
+                }
+
+                request = urllib.request.Request(
+                    'https://api.openai.com/v1/responses',
+                    data=json.dumps(payload).encode('utf-8'),
+                    headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'Content-Type': 'application/json'
+                    },
+                    method='POST'
+                )
+
+                # -----------------------------
+                # VALIDATE WORD
+                # -----------------------------
+                try:
+                    response = await asyncio.to_thread(
+                        urllib.request.urlopen,
+                        request,
+                        timeout=15
+                    )
+
+                    raw = response.read().decode('utf-8')
+                    result = json.loads(raw)
+
+                    answer = ''
+
+                    for output in result.get('output', []):
+                        for content in output.get('content', []):
+                            if content.get('type') == 'output_text':
+                                answer += content.get('text', '')
+
+                    valid = answer.strip().upper().startswith('YES')
+
+                except Exception as e:
+                    print(f'Word AI error: {e}')
+
+                    try:
+                        await guess_msg.add_reaction('❌')
+                    except Exception:
+                        pass
+
+                    continue
+
+                # -----------------------------
+                # WRONG WORD
+                # -----------------------------
+                if not valid:
+                    try:
+                        await guess_msg.add_reaction('❌')
+                    except Exception:
+                        pass
+
+                    continue
+
+                # -----------------------------
+                # CORRECT WORD - END GAME
+                # -----------------------------
+                if self.finished:
+                    return
+
+                self.finished = True
+
+                winner = guess_msg.author.id
+
+                loser = (
+                    member.id
+                    if winner == ctx.author.id
+                    else ctx.author.id
+                )
+
+                payout = (amount * Decimal('2')).quantize(
+                    Decimal('0.01')
+                )
+
+                await db.balance(winner, payout)
+
+                await db.record(
+                    winner,
+                    'Word',
+                    amount,
+                    'win',
+                    payout
+                )
+
+                await db.record(
+                    loser,
+                    'Word',
+                    amount,
+                    'loss',
+                    Decimal('0')
+                )
+
+                try:
+                    await guess_msg.add_reaction('✅')
+                except Exception:
+                    pass
+
+                return await interaction.message.edit(
+                    embed=emb(
+                        'Word Challenge — Winner!',
+                        f'🏆 <@{winner}> won!\n\n'
+                        f'**Correct Word:** `{guess}`\n'
+                        f'**Required Start:** `{fragment.title()}`\n\n'
+                        f'Prize: **{money(payout)} points**',
+                        GREEN
+                    ),
+                    view=None
+                )
+
+        # -----------------------------
+        # DECLINE
+        # -----------------------------
+        @discord.ui.button(
+            label='Decline',
+            style=discord.ButtonStyle.danger
+        )
+        async def decline(self, interaction, button):
+
+            if self.finished or self.accepted:
+                return await interaction.response.send_message(
+                    'This challenge has already started.',
+                    ephemeral=True
+                )
+
+            self.finished = True
+            self.stop()
+
+            await interaction.response.edit_message(
+                embed=emb(
+                    'Word Challenge Declined',
+                    f'{member.mention} declined the challenge.\n\n'
+                    'No points were deducted.',
+                    RED
+                ),
+                view=None
+            )
+
+        # -----------------------------
+        # INVITE TIMEOUT
+        # -----------------------------
+        async def on_timeout(self):
+
+            if self.accepted or self.finished:
+                return
+
+            self.finished = True
+
+            if self.message:
+                try:
+                    await self.message.edit(
+                        embed=emb(
+                            'Word Challenge Expired',
+                            'The challenge expired.\n\n'
+                            'No points were deducted.',
+                            RED
+                        ),
+                        view=None
+                    )
+                except Exception:
+                    pass
+
+    # -----------------------------
+    # CREATE INVITE
+    # -----------------------------
+    view = WordInviteView()
+
+    message = await ctx.send(
+        embed=emb(
+            'Word Challenge',
+            f'{ctx.author.mention} challenged '
+            f'{member.mention} for '
+            f'**{money(amount)} points**!\n\n'
+            f'{member.mention}, do you accept?\n\n'
+            'You have **60 seconds** to accept or decline.'
+        ),
+        view=view
+    )
+
+    view.message = message
 
 @bot.event
 async def on_raw_reaction_add(payload):
