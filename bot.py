@@ -1806,12 +1806,6 @@ WITHDRAWAL_LOG_CHANNEL = None
 
 
 def valid_ltc_address(address):
-    """
-    Basic Litecoin address validation.
-    Supports:
-    L... / M... / 3... legacy-style addresses
-    ltc1... bech32 addresses
-    """
     if not address:
         return False
 
@@ -1826,15 +1820,13 @@ def valid_ltc_address(address):
     return False
 
 
+# ============================================================
+# SET WITHDRAWAL LOG CHANNEL
+# ============================================================
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def wlog(ctx, channel: discord.TextChannel):
-    """
-    Set the channel where withdrawal logs are sent.
-
-    Usage:
-    .wlog #withdrawal-logs
-    """
 
     global WITHDRAWAL_LOG_CHANNEL
 
@@ -1849,44 +1841,41 @@ async def wlog(ctx, channel: discord.TextChannel):
     )
 
 
+# ============================================================
+# WITHDRAW
+# ============================================================
+
 @bot.command()
 async def withdraw(ctx, points: str, address: str):
-    """
-    Fake / simulated LTC withdrawal.
-
-    Usage:
-    .withdraw 77 Lxxxxxxxxxxxxxxxxxxxxxxxx
-    """
 
     # --------------------------------------------------------
     # AMOUNT
     # --------------------------------------------------------
 
     try:
-        amount = Decimal(points)
+        amount = Decimal(points).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError):
         return await ctx.send(
             embed=emb(
                 "Invalid Amount",
-                "Please enter a valid point amount.\n\n"
-                "Example: `.withdraw 77 L...`",
+                "Use a valid point amount.\n\n"
+                "Example:\n"
+                "`.withdraw 500 Lxxxxxxxxxxxxxxxxxxxxxxxx`",
                 RED
             )
         )
-
-    amount = amount.quantize(Decimal("0.01"))
 
     if amount <= 0:
         return await ctx.send(
             embed=emb(
                 "Invalid Amount",
-                "The withdrawal amount must be greater than **0 points**.",
+                "Withdrawal amount must be greater than **0 points**.",
                 RED
             )
         )
 
     # --------------------------------------------------------
-    # ADDRESS
+    # LTC ADDRESS
     # --------------------------------------------------------
 
     address = address.strip()
@@ -1895,34 +1884,30 @@ async def withdraw(ctx, points: str, address: str):
         return await ctx.send(
             embed=emb(
                 "Invalid Litecoin Address",
-                "That does not look like a valid Litecoin Mainnet address.\n\n"
-                "Accepted formats include addresses beginning with "
-                "`L`, `M`, `3`, or `ltc1`.",
+                "Please enter a valid Litecoin Mainnet address.",
                 RED
             )
         )
 
     # --------------------------------------------------------
-    # USER
+    # USER BALANCE
     # --------------------------------------------------------
 
     u = await db.user(ctx.author.id)
-
     balance = Decimal(str(u["balance"]))
 
     if balance < amount:
         return await ctx.send(
             embed=emb(
                 "Insufficient Balance",
-                f"You requested **{money(amount)} points**, "
-                f"but you only have **{money(balance)} points**.",
+                f"You requested **{money(amount)} points** "
+                f"but only have **{money(balance)} points**.",
                 RED
             )
         )
 
     # --------------------------------------------------------
-    # CALCULATE SIMULATED LTC
-    # Your existing rate:
+    # POINTS → LTC
     # 1 point = 0.0001 LTC
     # --------------------------------------------------------
 
@@ -1930,50 +1915,40 @@ async def withdraw(ctx, points: str, address: str):
         amount * Decimal("0.0001")
     ).quantize(Decimal("0.00000001"))
 
-    # --------------------------------------------------------
-    # CREATE REQUEST ID
-    # --------------------------------------------------------
-
     request_id = secrets.token_hex(8).upper()
 
     # --------------------------------------------------------
     # CONFIRMATION VIEW
+    # ONLY THE USER WHO CREATED THE REQUEST CAN CLICK
     # --------------------------------------------------------
 
     class WithdrawalView(discord.ui.View):
 
         def __init__(self):
             super().__init__(timeout=300)
-
             self.finished = False
 
         async def interaction_check(self, interaction):
 
-            # Only bot owner can approve/decline
-            try:
-                owner = await bot.is_owner(interaction.user)
-            except Exception:
-                owner = False
-
-            if not owner:
+            if interaction.user.id != ctx.author.id:
                 await interaction.response.send_message(
-                    "Only the bot owner can approve or decline withdrawals.",
+                    "❌ Only the user who requested this withdrawal can use these buttons.",
                     ephemeral=True
                 )
                 return False
 
             return True
 
+        # ====================================================
+        # ACCEPT
+        # ====================================================
+
         @discord.ui.button(
             label="Accept",
             emoji="✅",
             style=discord.ButtonStyle.success
         )
-        async def accept(
-            self,
-            interaction,
-            button
-        ):
+        async def accept(self, interaction, button):
 
             if self.finished:
                 return
@@ -1981,13 +1956,14 @@ async def withdraw(ctx, points: str, address: str):
             self.finished = True
 
             # ------------------------------------------------
-            # ATOMIC BALANCE CHECK + DEDUCTION
+            # REMOVE POINTS ATOMICALLY
             # ------------------------------------------------
 
             new_balance = await db.pool.fetchval(
                 """
                 UPDATE users
-                SET balance = balance - $2,
+                SET
+                    balance = balance - $2,
                     withdrawals = withdrawals + $2
                 WHERE user_id = $1
                   AND balance >= $2
@@ -2005,15 +1981,14 @@ async def withdraw(ctx, points: str, address: str):
                 return await interaction.response.edit_message(
                     embed=emb(
                         "Withdrawal Failed",
-                        "The user no longer has enough points "
-                        "to complete this withdrawal.",
+                        "You no longer have enough points for this withdrawal.",
                         RED
                     ),
                     view=self
                 )
 
             # ------------------------------------------------
-            # DATABASE WITHDRAWAL RECORD
+            # SAVE WITHDRAWAL
             # ------------------------------------------------
 
             try:
@@ -2029,7 +2004,7 @@ async def withdraw(ctx, points: str, address: str):
                     ltc_amount
                 )
             except Exception as e:
-                print(f"Withdrawal database error: {e}")
+                print(f"Withdrawal DB error: {e}")
 
             # ------------------------------------------------
             # FAKE TRANSACTION ID
@@ -2045,28 +2020,28 @@ async def withdraw(ctx, points: str, address: str):
                 child.disabled = True
 
             # ------------------------------------------------
-            # SUCCESS EMBED
+            # SUCCESS MESSAGE
             # ------------------------------------------------
 
-            success_embed = discord.Embed(
+            success = discord.Embed(
                 title="💰 Withdrawal Successful!",
                 description=(
-                    f"Your withdrawal of **{money(amount)} points** "
-                    f"has been approved.\n\n"
-                    f"**LTC Received:** `{ltc_amount:.8f} LTC`\n"
-                    f"**Address:** `{address}`\n"
+                    f"Your withdrawal has been successfully processed.\n\n"
+                    f"**Points Withdrawn:** `{money(amount)}`\n"
+                    f"**LTC Sent:** `{ltc_amount:.8f} LTC`\n"
+                    f"**Address:** `{address}`\n\n"
                     f"**Transaction ID:** `{txid}`"
                 ),
                 color=GREEN,
                 timestamp=datetime.now(timezone.utc)
             )
 
-            success_embed.set_footer(
+            success.set_footer(
                 text="LiteBet • Simulated Litecoin Withdrawal"
             )
 
             await interaction.response.edit_message(
-                embed=success_embed,
+                embed=success,
                 view=self
             )
 
@@ -2075,11 +2050,10 @@ async def withdraw(ctx, points: str, address: str):
             # ------------------------------------------------
 
             try:
-
                 dm = discord.Embed(
-                    title="💰 Withdrawal Approved!",
+                    title="💰 Withdrawal Successful!",
                     description=(
-                        f"Your LiteBet withdrawal has been approved.\n\n"
+                        f"Your withdrawal has been processed.\n\n"
                         f"**Points:** `{money(amount)}`\n"
                         f"**LTC:** `{ltc_amount:.8f} LTC`\n"
                         f"**Address:** `{address}`\n"
@@ -2090,7 +2064,7 @@ async def withdraw(ctx, points: str, address: str):
                 )
 
                 dm.set_footer(
-                    text="LiteBet • Simulated Withdrawal"
+                    text="LiteBet • Simulated Litecoin Withdrawal"
                 )
 
                 await ctx.author.send(embed=dm)
@@ -2134,13 +2108,13 @@ async def withdraw(ctx, points: str, address: str):
                         else "Unavailable"
                     )
 
-                    log_embed = discord.Embed(
+                    log = discord.Embed(
                         title="💰 Withdrawal Approved",
                         color=GREEN,
                         timestamp=datetime.now(timezone.utc)
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="User",
                         value=(
                             f"{ctx.author.mention}\n"
@@ -2149,7 +2123,7 @@ async def withdraw(ctx, points: str, address: str):
                         inline=True
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Amount",
                         value=(
                             f"**{money(amount)} points**\n"
@@ -2158,19 +2132,19 @@ async def withdraw(ctx, points: str, address: str):
                         inline=True
                     )
 
-                    log_embed.add_field(
-                        name="Address",
+                    log.add_field(
+                        name="Litecoin Address",
                         value=f"`{address}`",
                         inline=False
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Transaction ID",
                         value=f"`{txid}`",
                         inline=False
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Request Location",
                         value=(
                             f"Server: **{guild_name}**\n"
@@ -2181,41 +2155,37 @@ async def withdraw(ctx, points: str, address: str):
                         inline=False
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Request ID",
                         value=f"`{request_id}`",
                         inline=True
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Status",
                         value="✅ Approved",
                         inline=True
                     )
 
-                    log_embed.set_footer(
+                    log.set_footer(
                         text="LiteBet • Automatic Withdrawal Log"
                     )
 
                     try:
-                        await channel.send(
-                            embed=log_embed
-                        )
+                        await channel.send(embed=log)
                     except Exception as e:
-                        print(
-                            f"Withdrawal log error: {e}"
-                        )
+                        print(f"Withdrawal log error: {e}")
+
+        # ====================================================
+        # DECLINE
+        # ====================================================
 
         @discord.ui.button(
             label="Decline",
             emoji="❌",
             style=discord.ButtonStyle.danger
         )
-        async def decline(
-            self,
-            interaction,
-            button
-        ):
+        async def decline(self, interaction, button):
 
             if self.finished:
                 return
@@ -2226,7 +2196,7 @@ async def withdraw(ctx, points: str, address: str):
                 child.disabled = True
 
             # ------------------------------------------------
-            # DATABASE RECORD
+            # SAVE DECLINED WITHDRAWAL
             # ------------------------------------------------
 
             try:
@@ -2248,23 +2218,25 @@ async def withdraw(ctx, points: str, address: str):
             # DECLINED MESSAGE
             # ------------------------------------------------
 
-            declined_embed = discord.Embed(
+            declined = discord.Embed(
                 title="❌ Withdrawal Declined",
                 description=(
-                    f"The withdrawal request for "
-                    f"**{money(amount)} points** was declined.\n\n"
-                    f"**No points were removed from the user's balance.**"
+                    f"You declined your withdrawal request.\n\n"
+                    f"**Points:** `{money(amount)}`\n"
+                    f"**LTC:** `{ltc_amount:.8f} LTC`\n"
+                    f"**Address:** `{address}`\n\n"
+                    f"**No points were removed from your balance.**"
                 ),
                 color=RED,
                 timestamp=datetime.now(timezone.utc)
             )
 
-            declined_embed.set_footer(
+            declined.set_footer(
                 text="LiteBet • Withdrawal"
             )
 
             await interaction.response.edit_message(
-                embed=declined_embed,
+                embed=declined,
                 view=self
             )
 
@@ -2298,13 +2270,13 @@ async def withdraw(ctx, points: str, address: str):
                         else "Unavailable"
                     )
 
-                    log_embed = discord.Embed(
+                    log = discord.Embed(
                         title="❌ Withdrawal Declined",
                         color=RED,
                         timestamp=datetime.now(timezone.utc)
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="User",
                         value=(
                             f"{ctx.author.mention}\n"
@@ -2313,7 +2285,7 @@ async def withdraw(ctx, points: str, address: str):
                         inline=True
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Amount",
                         value=(
                             f"**{money(amount)} points**\n"
@@ -2322,13 +2294,13 @@ async def withdraw(ctx, points: str, address: str):
                         inline=True
                     )
 
-                    log_embed.add_field(
-                        name="Address",
+                    log.add_field(
+                        name="Litecoin Address",
                         value=f"`{address}`",
                         inline=False
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Request Location",
                         value=(
                             f"Server: **{guild_name}**\n"
@@ -2338,30 +2310,30 @@ async def withdraw(ctx, points: str, address: str):
                         inline=False
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Request ID",
                         value=f"`{request_id}`",
                         inline=True
                     )
 
-                    log_embed.add_field(
+                    log.add_field(
                         name="Status",
                         value="❌ Declined",
                         inline=True
                     )
 
-                    log_embed.set_footer(
+                    log.set_footer(
                         text="LiteBet • Automatic Withdrawal Log"
                     )
 
                     try:
-                        await channel.send(
-                            embed=log_embed
-                        )
+                        await channel.send(embed=log)
                     except Exception as e:
-                        print(
-                            f"Withdrawal decline log error: {e}"
-                        )
+                        print(f"Withdrawal log error: {e}")
+
+        # ====================================================
+        # TIMEOUT
+        # ====================================================
 
         async def on_timeout(self):
 
@@ -2378,7 +2350,7 @@ async def withdraw(ctx, points: str, address: str):
                     embed=emb(
                         "Withdrawal Expired",
                         "This withdrawal confirmation expired.\n\n"
-                        "No points were removed.",
+                        "**No points were removed.**",
                         RED
                     ),
                     view=self
@@ -2386,19 +2358,20 @@ async def withdraw(ctx, points: str, address: str):
             except Exception:
                 pass
 
-    # --------------------------------------------------------
-    # CONFIRMATION MESSAGE
-    # --------------------------------------------------------
+    # ========================================================
+    # CONFIRMATION EMBED
+    # ========================================================
 
     confirmation = discord.Embed(
         title="💸 Litecoin Withdrawal",
         description=(
-            f"**{ctx.author.mention}** requested a withdrawal.\n\n"
+            f"**{ctx.author.mention}**, please confirm your withdrawal.\n\n"
             f"**Points:** `{money(amount)}`\n"
             f"**LTC Amount:** `{ltc_amount:.8f} LTC`\n"
             f"**Address:**\n`{address}`\n\n"
             f"**Request ID:** `{request_id}`\n\n"
-            f"An owner must approve or decline this request."
+            f"Choose **Accept** to process the withdrawal "
+            f"or **Decline** to cancel it."
         ),
         color=0xF0B90B,
         timestamp=datetime.now(timezone.utc)
@@ -2416,6 +2389,10 @@ async def withdraw(ctx, points: str, address: str):
     confirmation.set_footer(
         text="LiteBet • Withdrawal Confirmation"
     )
+
+    # ========================================================
+    # SEND CONFIRMATION
+    # ========================================================
 
     view = WithdrawalView()
 
