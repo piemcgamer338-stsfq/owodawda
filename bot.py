@@ -1805,7 +1805,7 @@ async def leaderboard(ctx):
 HOUSE_LTC = Decimal("0")
 HOUSE_USD = Decimal("0")
 
-LTC_EMOJI = ":litecoinlogo:"
+LTC_EMOJI = "<:SA_LTC_LiteCoin:1538206742201106542>"
 
 
 @bot.command(aliases=["hb"])
