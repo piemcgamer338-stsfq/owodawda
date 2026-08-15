@@ -300,8 +300,93 @@ async def coinflip(ctx, amount: str, choice: str=None):
     await asyncio.sleep(2); await finish(ctx,'Coinflip',amount,choice==landed,Decimal('1.92'),f'**Choice:** {choice.title()}\n**Landed:** {landed.title()}\n🔒 **Provably Fair**\nPublic Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
 @bot.command()
 async def ward(ctx, amount: Decimal):
-    if not await require_game(ctx,amount): return
-    a,b=random.randint(1,6),random.randint(1,6); await finish(ctx,'Ward Game',amount,a>b,Decimal('1.90'),f'**{ctx.author.display_name}** rolled: **{a}**\n**LiteBet** rolled: **{b}**')
+    # Deduct the bet once
+    if not await require_game(ctx, amount):
+        return
+
+    # Rolling message
+    message = await ctx.send(
+        '<a:rollingdice:1538016308707201164> **Rolling the dice...**'
+    )
+
+    # Wait 3 seconds
+    await asyncio.sleep(3)
+
+    # Roll both dice
+    player_roll = random.randint(1, 6)
+    litebet_roll = random.randint(1, 6)
+
+    # Determine result
+    won = player_roll > litebet_roll
+
+    # Tie = loss for the player
+    if player_roll == litebet_roll:
+        won = False
+
+    # Payout multiplier
+    multiplier = Decimal('1.90')
+
+    # Result details
+    if player_roll > litebet_roll:
+        detail = (
+            f'🎲 **{ctx.author.display_name}** rolled: '
+            f'**{player_roll}**\n'
+            f'🎲 **LiteBet** rolled: **{litebet_roll}**\n\n'
+            f'🏆 You rolled higher!'
+        )
+
+    elif player_roll < litebet_roll:
+        detail = (
+            f'🎲 **{ctx.author.display_name}** rolled: '
+            f'**{player_roll}**\n'
+            f'🎲 **LiteBet** rolled: **{litebet_roll}**\n\n'
+            f'💀 LiteBet rolled higher!'
+        )
+
+    else:
+        detail = (
+            f'🎲 **{ctx.author.display_name}** rolled: '
+            f'**{player_roll}**\n'
+            f'🎲 **LiteBet** rolled: **{litebet_roll}**\n\n'
+            f'🤝 It was a tie!'
+        )
+
+    # Calculate payout
+    payout = (
+        amount * multiplier
+    ).quantize(Decimal('0.01')) if won else Decimal('0')
+
+    # Record wager and payout exactly once
+    await db.record(
+        ctx.author.id,
+        'Ward Game',
+        amount,
+        'win' if won else 'loss',
+        payout
+    )
+
+    # Build final embed
+    result = emb(
+        f'Ward Game — {"You Won!" if won else "You Lost!"}',
+        (
+            f'**Bet:** {money(amount)} points\n'
+            f'**Multiplier:** {multiplier:.2f}×\n\n'
+            f'{detail}\n\n'
+            + (
+                f'🎉 **You received {money(payout)} points!**'
+                if won
+                else
+                'Better luck next time.'
+            )
+        ),
+        GREEN if won else RED
+    )
+
+    # Edit the original rolling message
+    await message.edit(
+        content=None,
+        embed=result
+    )
 @bot.command()
 async def limbo(ctx, amount: Decimal, target: Decimal):
     # Validate target
