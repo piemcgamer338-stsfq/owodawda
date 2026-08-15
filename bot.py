@@ -394,40 +394,54 @@ async def ward(ctx, amount: Decimal):
     if not await require_game(ctx, amount):
         return
 
-    # Send rolling animation first
-    message = await ctx.send('<a:rollingdice:1538016308707201164>')
+    # Rolling animation
+    message = await ctx.send(
+        '<a:rollingdice:1538016308707201164>'
+    )
 
-    # Let the animation play
     await asyncio.sleep(2.5)
 
     # --------------------------------------------------
-    # WIN CHANCE
+    # INDEPENDENT WIN CHANCE
     # --------------------------------------------------
-    # Bets above 100 points have a 30% player win chance.
-    # Bets 100 or below have a 50% player win chance.
+    # Every game gets a completely fresh random chance.
+    #
+    # 100 points or less  = 50% player chance
+    # Above 100 points    = 30% player chance
+    #
+    # Previous games have NO effect on this game.
+    # --------------------------------------------------
+
     if amount > Decimal('100'):
-        player_wins = random.random() < 0.30
+        player_wins = secrets.randbelow(10000) < 3000
     else:
-        player_wins = random.random() < 0.50
+        player_wins = secrets.randbelow(10000) < 5000
 
     # --------------------------------------------------
-    # GENERATE DICE THAT MATCH THE RESULT
+    # GENERATE ROLLS
     # --------------------------------------------------
+
     if player_wins:
-        # Player must beat LiteBet
-        player_roll = random.randint(2, 6)
-        litebet_roll = random.randint(1, player_roll - 1)
+        # Make player's roll higher
+        litebet_roll = random.randint(1, 5)
+        player_roll = random.randint(litebet_roll + 1, 6)
 
     else:
-        # LiteBet must beat Player
-        litebet_roll = random.randint(2, 6)
-        player_roll = random.randint(1, litebet_roll - 1)
+        # Make LiteBet's roll higher
+        player_roll = random.randint(1, 5)
+        litebet_roll = random.randint(player_roll + 1, 6)
+
+    # --------------------------------------------------
+    # SAFETY CHECK
+    # --------------------------------------------------
+
+    won = player_roll > litebet_roll
 
     # --------------------------------------------------
     # PAYOUT
     # --------------------------------------------------
+
     multiplier = Decimal('1.90')
-    won = player_roll > litebet_roll
 
     if won:
         payout = (amount * multiplier).quantize(Decimal('0.01'))
@@ -440,16 +454,16 @@ async def ward(ctx, amount: Decimal):
             payout
         )
 
-        result_text = (
+        description = (
             f'**{ctx.author.display_name}** won the pot of '
             f'**{money(payout)} points!**\n\n'
             f'**Player Rolled:** {player_roll}\n'
             f'**LiteBet Rolled:** {litebet_roll}'
         )
 
-        result_embed = emb(
+        result = emb(
             '🎲 Ward Game — You Won!',
-            result_text,
+            description,
             GREEN
         )
 
@@ -462,23 +476,23 @@ async def ward(ctx, amount: Decimal):
             Decimal('0')
         )
 
-        result_text = (
+        description = (
             f'**LiteBet** won the pot of '
             f'**{money(amount * multiplier)} points!**\n\n'
             f'**Player Rolled:** {player_roll}\n'
             f'**LiteBet Rolled:** {litebet_roll}'
         )
 
-        result_embed = emb(
+        result = emb(
             '🎲 Ward Game — You Lost',
-            result_text,
+            description,
             RED
         )
 
-    # Edit the original rolling message
+    # Replace the rolling animation with the result
     await message.edit(
         content=None,
-        embed=result_embed
+        embed=result
     )
 async def limbo(ctx, amount: Decimal, target: Decimal):
     if target<Decimal('1.01') or target>Decimal('100'): return await ctx.send(embed=emb('Invalid target','Choose a target from 1.01× to 100×.',RED))
