@@ -71,7 +71,16 @@ def derive_ltc_address_from_xpub(xpub: str, index: int) -> str:
 
 class HiloView(discord.ui.View):
     def __init__(self, author_id, amount, rank, suit, server, client, public_hash):
-        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.streak=0; self.message=None
+        super().__init__(timeout=90)
+        self.author_id=author_id
+        self.amount=amount
+        self.rank=rank
+        self.suit=suit
+        self.server=server
+        self.client=client
+        self.public_hash=public_hash
+        self.streak=0
+        self.message=None
     def current_embed(self):
         return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the next card is higher or lower than your current card.')
     async def interaction_check(self, interaction):
