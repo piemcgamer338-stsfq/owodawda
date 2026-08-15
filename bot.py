@@ -542,7 +542,6 @@ async def ttt(ctx, member: discord.Member, amount: Decimal):
 
 # Word Command Replacement
 
-```python
 @bot.command()
 async def word(ctx, amount: Decimal, member: discord.Member):
 
