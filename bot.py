@@ -1735,8 +1735,6 @@ async def address(ctx, ltc_address: str):
     await ctx.send(embed=emb('LTC Address Balance',f'**Address:** `{ltc_address}`\n**Balance:** External explorer lookup is configured through `LTC_EXPLORER_URL`.'))
 @bot.command(aliases=['depo'])
 async def deposit(ctx):
-    from bip_utils import Bip44, Bip44Coins, Bip44Changes
-
     xpub = os.getenv("LTC_XPUB")
 
     if not xpub:
@@ -1748,33 +1746,36 @@ async def deposit(ctx):
             )
         )
 
-    try:
-        u = await db.user(ctx.author.id)
+    u = await db.user(ctx.author.id)
 
-        # Reuse the same address if this user already has one
-        if u["deposit_address"]:
-            address = u["deposit_address"]
+    # Generate/reuse the user's unique deposit address
+    address = u["deposit_address"]
 
-        else:
+    if not address:
+        try:
+            from bip_utils import (
+                Bip44,
+                Bip44Coins,
+                Bip32Utils
+            )
+
             index = int(u["deposit_index"])
 
-            # Load Litecoin account XPUB
+            # Derive a unique Litecoin address from the XPUB
             wallet = Bip44.FromExtendedKey(
                 xpub,
                 Bip44Coins.LITECOIN
             )
 
-            # Derive external address:
-            # ... / 0 / index
-            address = (
+            child = (
                 wallet
                 .Change(Bip44Changes.CHAIN_EXT)
                 .AddressIndex(index)
-                .PublicKey()
-                .ToAddress()
             )
 
-            # Save address and advance index
+            address = child.PublicKey().ToAddress()
+
+            # Save address to this user
             async with db.pool.acquire() as c:
                 await c.execute(
                     """
@@ -1787,37 +1788,53 @@ async def deposit(ctx):
                     address
                 )
 
+        except Exception as e:
+            print("Deposit address error:", e)
+
+            return await ctx.send(
+                embed=emb(
+                    "Deposit error",
+                    "I couldn't generate your Litecoin deposit address.",
+                    RED
+                )
+            )
+
+    # DM embed
+    embed = discord.Embed(
+        title="Your Litecoin Deposit Address",
+        description=(
+            f"{ctx.author.mention}, deposit **Litecoin (LTC)** only.\n\n"
+            f"```{address}```\n\n"
+            f"**Minimum:** `0.0005 LTC`\n"
+            f"**Conversion:** `1 point = 0.0001 LTC`\n"
+            f"**Fee:** `0%`\n\n"
+            "Your deposit will be credited after the required "
+            "block confirmations."
+        ),
+        color=discord.Color.green()
+    )
+
+    embed.set_footer(text="LiteBet • Litecoin Mainnet")
+
+    try:
+        await ctx.author.send(embed=embed)
+
         await ctx.send(
             embed=emb(
-                "Litecoin Deposit",
-                f"Send **LTC** to the address below:\n\n"
-                f"```{address}```\n\n"
-                f"**Network:** Litecoin Mainnet\n"
-                f"**Currency:** LTC\n\n"
-                f"Your deposit will be credited after the required "
-                f"confirmations.",
+                "Deposit address sent",
+                "I've sent your Litecoin deposit address to your DMs.",
                 GREEN
             )
         )
 
-    except Exception as e:
-        print(f"Deposit address error: {e}")
-
+    except discord.Forbidden:
         await ctx.send(
             embed=emb(
-                "Deposit Error",
-                "I couldn't generate your Litecoin deposit address.\n"
-                "Please contact the owner.",
+                "DMs are closed",
+                "I couldn't DM you. Please enable DMs from this server and try `.deposit` again.",
                 RED
             )
         )
-    if amount<50: return await ctx.send(embed=emb('Minimum withdrawal','Minimum withdrawal is **50 points**.',RED))
-    if await db.frozen(): return await ctx.send(embed=emb('Withdrawals are frozen','An administrator has temporarily locked withdrawals.',RED))
-    if not await db.debit(ctx.author.id,amount): return await ctx.send(embed=emb('Insufficient balance','You do not have enough points.',RED))
-    ltc=(amount*RATE).quantize(Decimal('.00000001'))
-    async with db.pool.acquire() as c:
-        req=await c.fetchrow('INSERT INTO withdrawals(user_id,address,points,ltc) VALUES($1,$2,$3,$4) RETURNING id',ctx.author.id,address,amount,ltc)
-    await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${amount*USD_PER_POINT:.2f})!\n\nYour request is queued for manual payout.',GREEN))
     if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount: **{ltc} LTC**'))
 @bot.command()
 async def worldtime(ctx):
