@@ -456,7 +456,6 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
         limbo_card(float(crashed))
     )
 
-```python
 @bot.command(aliases=['bj'])
 async def blackjack(ctx, amount: Decimal):
     if not await require_game(ctx, amount):
