@@ -1290,14 +1290,100 @@ async def hilo(ctx, amount: Decimal):
     s,c,h=seed(); await finish(ctx,'Hi-Lo',amount,won,Decimal('1.70'),f'Card: **{first}** → Next card: **{second}**\nResult: **{"Higher" if high else "Lower"}**\n🔒 Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
 
 @bot.command()
-async def mines(ctx, amount: Decimal, bombs: int=4):
-    if bombs<1 or bombs>20: return await ctx.send(embed=emb('Invalid mine count','Choose from 1 to 20 bombs.',RED))
-    if not await require_game(ctx,amount): return
-    safe=25-bombs; revealed=random.randint(0,min(6,safe)); won=revealed>0 and random.random()>.35
-    mult=Decimal('1')+Decimal(revealed)*Decimal('.18')
-    s,c,h=seed(); grid=' '.join('💎' if i<revealed else '⬛' for i in range(25))
-    await finish(ctx,'Mines',amount,won,mult,f'**Bet Amount:** {money(amount)}\n**Current Multiplier:** {mult:.2f}×\n**Profits:** {money(amount*(mult-1) if won else 0)} points\n{bombs} 💣 | {safe} 💎\n{grid}\n🔒 Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
+async def mines(ctx, amount: Decimal, bombs: int = 4):
 
+    if bombs < 1 or bombs > 24:
+        return await ctx.send(
+            embed=emb(
+                'Invalid mine count',
+                'Choose from **1 to 24 bombs**.',
+                RED
+            )
+        )
+
+    if not await require_game(ctx, amount):
+        return
+
+    total_tiles = 25
+    safe_tiles = total_tiles - bombs
+
+    # Random number of tiles revealed for this round
+    revealed = random.randint(
+        1,
+        min(8, safe_tiles)
+    )
+
+    # --------------------------------------------------------
+    # MINES MULTIPLIER
+    # Based on the probability of surviving each safe pick.
+    # Includes a small house edge.
+    # --------------------------------------------------------
+
+    HOUSE_EDGE = Decimal("0.99")
+
+    mult = Decimal("1")
+
+    for i in range(revealed):
+
+        remaining_tiles = total_tiles - i
+        remaining_safe = safe_tiles - i
+
+        if remaining_safe <= 0:
+            break
+
+        # Probability that the next tile is safe
+        probability = (
+            Decimal(remaining_safe)
+            / Decimal(remaining_tiles)
+        )
+
+        # Fair multiplier for this step
+        step = Decimal("1") / probability
+
+        # Apply house edge
+        step *= HOUSE_EDGE
+
+        mult *= step
+
+    mult = mult.quantize(Decimal("0.01"))
+
+    # --------------------------------------------------------
+    # RESULT
+    # --------------------------------------------------------
+
+    won = random.random() > 0.35
+
+    s, c, h = seed()
+
+    grid = " ".join(
+        "💎" if i < revealed else "⬛"
+        for i in range(total_tiles)
+    )
+
+    profit = (
+        amount * (mult - Decimal("1"))
+        if won
+        else Decimal("0")
+    )
+
+    await finish(
+        ctx,
+        'Mines',
+        amount,
+        won,
+        mult,
+        f'**Bet Amount:** {money(amount)}\n'
+        f'**Mines:** {bombs} 💣\n'
+        f'**Safe Tiles:** {safe_tiles} 💎\n'
+        f'**Safe Tiles Revealed:** {revealed}\n'
+        f'**Current Multiplier:** {mult:.2f}×\n'
+        f'**Profits:** {money(profit)} points\n\n'
+        f'{grid}\n\n'
+        f'🔒 Hash: `{h}`\n'
+        f'Server Seed: `{s}`\n'
+        f'Client Seed: `{c}`'
+    )
+    
 @bot.command()
 async def tower(ctx, amount: Decimal, difficulty: str = None):
 
