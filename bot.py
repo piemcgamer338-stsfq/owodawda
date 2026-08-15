@@ -1735,107 +1735,104 @@ async def address(ctx, ltc_address: str):
     await ctx.send(embed=emb('LTC Address Balance',f'**Address:** `{ltc_address}`\n**Balance:** External explorer lookup is configured through `LTC_EXPLORER_URL`.'))
 @bot.command(aliases=['depo'])
 async def deposit(ctx):
-    xpub = os.getenv("LTC_XPUB")
+    xpub = os.getenv('LTC_XPUB')
 
     if not xpub:
         return await ctx.send(
             embed=emb(
-                "Deposit unavailable",
-                "The owner has not configured `LTC_XPUB` yet.",
+                'Deposit unavailable',
+                'The owner has not configured `LTC_XPUB` yet.',
                 RED
             )
         )
-
-    u = await db.user(ctx.author.id)
-
-    # Generate/reuse the user's unique deposit address
-    address = u["deposit_address"]
-
-    if not address:
-        try:
-            from bip_utils import (
-                Bip44,
-                Bip44Coins,
-                Bip32Utils
-            )
-
-            index = int(u["deposit_index"])
-
-            # Derive a unique Litecoin address from the XPUB
-            wallet = Bip44.FromExtendedKey(
-                xpub,
-                Bip44Coins.LITECOIN
-            )
-
-            child = (
-                wallet
-                .Change(Bip44Changes.CHAIN_EXT)
-                .AddressIndex(index)
-            )
-
-            address = child.PublicKey().ToAddress()
-
-            # Save address to this user
-            async with db.pool.acquire() as c:
-                await c.execute(
-                    """
-                    UPDATE users
-                    SET deposit_address = $2,
-                        deposit_index = deposit_index + 1
-                    WHERE user_id = $1
-                    """,
-                    ctx.author.id,
-                    address
-                )
-
-        except Exception as e:
-            print("Deposit address error:", e)
-
-            return await ctx.send(
-                embed=emb(
-                    "Deposit error",
-                    "I couldn't generate your Litecoin deposit address.",
-                    RED
-                )
-            )
-
-    # DM embed
-    embed = discord.Embed(
-        title="Your Litecoin Deposit Address",
-        description=(
-            f"{ctx.author.mention}, deposit **Litecoin (LTC)** only.\n\n"
-            f"```{address}```\n\n"
-            f"**Minimum:** `0.0005 LTC`\n"
-            f"**Conversion:** `1 point = 0.0001 LTC`\n"
-            f"**Fee:** `0%`\n\n"
-            "Your deposit will be credited after the required "
-            "block confirmations."
-        ),
-        color=discord.Color.green()
-    )
-
-    embed.set_footer(text="LiteBet • Litecoin Mainnet")
 
     try:
-        await ctx.author.send(embed=embed)
+        # Get user / create user if needed
+        u = await db.user(ctx.author.id)
 
-        await ctx.send(
-            embed=emb(
-                "Deposit address sent",
-                "I've sent your Litecoin deposit address to your DMs.",
-                GREEN
-            )
+        # Get the next unused deposit index
+        index = int(u['deposit_index'])
+
+        # Derive Litecoin address from the account XPUB
+        wallet = Bip44.FromExtendedKey(
+            xpub,
+            Bip44Coins.LITECOIN
         )
 
-    except discord.Forbidden:
+        address = (
+            wallet
+            .Change(Bip44Changes.CHAIN_EXT)
+            .AddressIndex(index)
+            .PublicKey()
+            .ToAddress()
+        )
+
+        # Move to the next index so the next user gets a new address
+        await db.pool.execute(
+            """
+            UPDATE users
+            SET deposit_index = deposit_index + 1,
+                deposit_address = $2
+            WHERE user_id = $1
+            """,
+            ctx.author.id,
+            address
+        )
+
+        # DM the user
+        dm_embed = discord.Embed(
+            title='Your Litecoin Deposit Address',
+            description=(
+                f'Please send **Litecoin (LTC)** only to the address below.\n\n'
+                f'`{address}`\n\n'
+                f'**Network:** Litecoin Mainnet\n'
+                f'**Currency:** LTC\n\n'
+                f'Your deposit will be credited after the required confirmations.'
+            ),
+            color=GREEN
+        )
+
+        dm_embed.set_footer(text='LiteBet • Litecoin Deposits')
+
+        try:
+            await ctx.author.send(embed=dm_embed)
+
+            await ctx.send(
+                embed=emb(
+                    'Deposit Address Sent',
+                    'I have sent your **Litecoin (LTC)** deposit address to your DMs.',
+                    GREEN
+                )
+            )
+
+        except discord.Forbidden:
+            # DMs disabled
+            channel_embed = discord.Embed(
+                title='Litecoin Deposit Address',
+                description=(
+                    f'Your DMs are closed, so I could not send the address privately.\n\n'
+                    f'**Your address:**\n'
+                    f'`{address}`\n\n'
+                    f'**Network:** Litecoin Mainnet\n'
+                    f'**Currency:** LTC\n\n'
+                    f'Your deposit will be credited after the required confirmations.'
+                ),
+                color=GREEN
+            )
+
+            await ctx.send(embed=channel_embed)
+
+    except Exception as e:
+        print(f'Deposit error for {ctx.author.id}: {e}')
+
         await ctx.send(
             embed=emb(
-                "DMs are closed",
-                "I couldn't DM you. Please enable DMs from this server and try `.deposit` again.",
+                'Deposit Error',
+                'I could not generate your Litecoin deposit address. Please try again.',
                 RED
             )
         )
-    if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount: **{ltc} LTC**'))
+        
 @bot.command()
 async def worldtime(ctx):
     now=datetime.now(timezone.utc); await ctx.send(embed=emb('🌍 World Time',f'UTC: <t:{int(now.timestamp())}:F>\nIndia: <t:{int(now.timestamp())}:F>\nUse Discord’s local rendering to see the exact time in your timezone.'))
