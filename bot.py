@@ -44,7 +44,11 @@ async def require_game(ctx, amount):
 async def finish(ctx, game, amount, won, multiplier, detail, image=None):
     payout=(amount*multiplier).quantize(Decimal('0.01')) if won else Decimal('0')
     await db.record(ctx.author.id,game,amount,'win' if won else 'loss',payout)
-    e=emb(f'{game} — You {"Won" if won else "Lost"}',f'**Bet:** {money(amount)} points\n{detail}\n\n'+(f'Congratulations! You received **{money(payout)} points**.' if won else 'Better luck next time.'), GREEN if won else RED)
+    e = emb(
+        f'{game} — You {"Won" if won else "Lost"}',
+        f'**Bet:** {money(amount)} points\n{detail}\n\n' + (f'Congratulations! You received **{money(payout)} points**.' if won else 'Better luck next time.'),
+        GREEN if won else RED
+    )
     if image: e.set_image(url=f'attachment://{image.name}'); await ctx.send(embed=e,file=discord.File(image))
     else: await ctx.send(embed=e)
 
@@ -67,9 +71,9 @@ def derive_ltc_address_from_xpub(xpub: str, index: int) -> str:
 
 class HiloView(discord.ui.View):
     def __init__(self, author_id, amount, rank, suit, server, client, public_hash):
-        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.strea[...[...]
+        super().__init__(timeout=90); self.author_id=author_id; self.amount=amount; self.rank=rank; self.suit=suit; self.server=server; self.client=client; self.public_hash=public_hash; self.streak=0; self.message=None
     def current_embed(self):
-        return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the ne[...]
+        return emb('Hi-Lo',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {(Decimal("1")+Decimal(self.streak)*Decimal(".20")):.2f}x\n**Streak:** {self.streak}\n\nChoose whether the next card is higher or lower than your current card.')
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message('Only the player who started this Hi-Lo game can use these buttons.',ephemeral=True); return False
@@ -170,7 +174,7 @@ async def withdraw(ctx, address: str, amount: Decimal):
     async with db.pool.acquire() as c:
         req=await c.fetchrow('INSERT INTO withdrawals(user_id,address,points,ltc) VALUES($1,$2,$3,$4) RETURNING id',ctx.author.id,address,amount,ltc)
     await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${(amount*USD_PER_POINT):.2f})!'))
-    if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\\nUser: {ctx.author.mention}\\nAddress: `{address}`\\nAmount: {money(amount)} points'))
+    if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount: {money(amount)} points'))
 
 # ... remainder of file unchanged ...
 
