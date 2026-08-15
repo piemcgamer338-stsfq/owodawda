@@ -88,7 +88,7 @@ class TttView(discord.ui.View):
         super().__init__(timeout=180)
 
         self.players = [first_id, second_id]
-        self.amount = amount
+        self.amount = Decimal(str(amount))
         self.turn = 0
         self.board = [''] * 9
         self.message = None
@@ -101,33 +101,46 @@ class TttView(discord.ui.View):
                 row=i // 3,
                 custom_id=f'ttt:{i}'
             )
-
             button.callback = self.move
             self.add_item(button)
 
-    def board_embed(self, note=''):
+    def board_text(self):
+        symbols = []
+
+        for value in self.board:
+            if value == 'X':
+                symbols.append('❌')
+            elif value == 'O':
+                symbols.append('⭕')
+            else:
+                symbols.append('⬜')
+
+        return (
+            f'{symbols[0]} {symbols[1]} {symbols[2]}\n'
+            f'{symbols[3]} {symbols[4]} {symbols[5]}\n'
+            f'{symbols[6]} {symbols[7]} {symbols[8]}'
+        )
+
+    def board_embed(self, note=None):
         current_player = self.players[self.turn]
-        symbol = 'X' if self.turn == 0 else 'O'
+        symbol = '❌' if self.turn == 0 else '⭕'
 
         description = (
-            f'<@{self.players[0]}> is **X**\n'
-            f'<@{self.players[1]}> is **O**\n\n'
+            f'<@{self.players[0]}> — ❌\n'
+            f'<@{self.players[1]}> — ⭕\n\n'
+            f'{self.board_text()}\n\n'
         )
 
         if note:
             description += f'{note}\n\n'
 
         description += (
-            f'It is <@{current_player}>\'s turn '
-            f'(**{symbol}**).\n\n'
-            f'**Pot:** {money(self.amount * 2)} points'
+            f'**Bet:** {money(self.amount)} points\n'
+            f'**Pot:** {money(self.amount * 2)} points\n\n'
+            f'It is <@{current_player}>\'s turn ({symbol}).'
         )
 
-        return emb(
-            'Tic-Tac-Toe',
-            description,
-            NAVY
-        )
+        return emb('Tic-Tac-Toe', description)
 
     async def interaction_check(self, interaction):
         if self.finished:
@@ -147,176 +160,206 @@ class TttView(discord.ui.View):
         return True
 
     async def move(self, interaction):
-        index = int(
-            interaction.data['custom_id'].split(':')[1]
-        )
-
-        if self.board[index]:
-            return await interaction.response.send_message(
-                'That square is already taken.',
-                ephemeral=True
+        try:
+            index = int(
+                interaction.data['custom_id'].split(':')[1]
             )
 
-        mark = 'X' if self.turn == 0 else 'O'
-        self.board[index] = mark
+            if self.board[index]:
+                await interaction.response.send_message(
+                    'That square is already taken.',
+                    ephemeral=True
+                )
+                return
 
-        button = next(
-            x for x in self.children
-            if x.custom_id == interaction.data['custom_id']
-        )
+            mark = 'X' if self.turn == 0 else 'O'
+            self.board[index] = mark
 
-        button.label = mark
-        button.disabled = True
-
-        if mark == 'X':
-            button.style = discord.ButtonStyle.primary
-        else:
-            button.style = discord.ButtonStyle.success
-
-        wins = (
-            (0, 1, 2),
-            (3, 4, 5),
-            (6, 7, 8),
-            (0, 3, 6),
-            (1, 4, 7),
-            (2, 5, 8),
-            (0, 4, 8),
-            (2, 4, 6)
-        )
-
-        # Check winner
-        if any(
-            all(self.board[i] == mark for i in line)
-            for line in wins
-        ):
-            self.finished = True
-            self.stop()
-
-            winner = self.players[self.turn]
-            loser = self.players[1 - self.turn]
-
-            payout = (
-                self.amount * Decimal('2')
-            ).quantize(Decimal('0.01'))
-
-            await db.balance(winner, payout)
-
-            await db.record(
-                winner,
-                'Tic-Tac-Toe',
-                self.amount,
-                'win',
-                payout
+            button = next(
+                x for x in self.children
+                if x.custom_id == interaction.data['custom_id']
             )
 
-            await db.record(
-                loser,
-                'Tic-Tac-Toe',
-                self.amount,
-                'loss',
-                Decimal('0')
+            button.label = '❌' if mark == 'X' else '⭕'
+            button.disabled = True
+
+            if mark == 'X':
+                button.style = discord.ButtonStyle.primary
+            else:
+                button.style = discord.ButtonStyle.success
+
+            wins = [
+                (0, 1, 2),
+                (3, 4, 5),
+                (6, 7, 8),
+                (0, 3, 6),
+                (1, 4, 7),
+                (2, 5, 8),
+                (0, 4, 8),
+                (2, 4, 6)
+            ]
+
+            won = any(
+                all(self.board[i] == mark for i in line)
+                for line in wins
             )
 
-            return await interaction.response.edit_message(
-                embed=emb(
-                    'Tic-Tac-Toe — Game Over',
-                    f'<@{winner}> won the game!\n\n'
-                    f'**Prize:** {money(payout)} points',
+            # -------------------------
+            # WIN
+            # -------------------------
+            if won:
+                self.finished = True
+                self.stop()
+
+                winner = self.players[self.turn]
+                loser = self.players[1 - self.turn]
+
+                payout = (
+                    self.amount * Decimal('2')
+                ).quantize(Decimal('0.01'))
+
+                await db.balance(winner, payout)
+
+                await db.record(
+                    winner,
+                    'Tic-Tac-Toe',
+                    self.amount,
+                    'win',
+                    payout
+                )
+
+                await db.record(
+                    loser,
+                    'Tic-Tac-Toe',
+                    self.amount,
+                    'loss',
+                    Decimal('0')
+                )
+
+                # Disable every button
+                for child in self.children:
+                    child.disabled = True
+
+                embed = emb(
+                    'Tic-Tac-Toe — Winner!',
+                    f'{self.board_text()}\n\n'
+                    f'🏆 <@{winner}> won the game!\n\n'
+                    f'**Prize:** {money(payout)} points\n'
+                    f'**Bet:** {money(self.amount)} points',
                     GREEN
-                ),
-                view=self
-            )
+                )
 
-        # Check draw
-        if all(self.board):
-            self.finished = True
-            self.stop()
+                await interaction.response.edit_message(
+                    embed=embed,
+                    view=self
+                )
 
-            await db.balance(
-                self.players[0],
-                self.amount
-            )
+                return
 
-            await db.balance(
-                self.players[1],
-                self.amount
-            )
+            # -------------------------
+            # DRAW
+            # -------------------------
+            if all(self.board):
+                self.finished = True
+                self.stop()
 
-            await db.record(
-                self.players[0],
-                'Tic-Tac-Toe',
-                self.amount,
-                'draw',
-                self.amount
-            )
+                # Refund both players
+                await db.balance(
+                    self.players[0],
+                    self.amount
+                )
 
-            await db.record(
-                self.players[1],
-                'Tic-Tac-Toe',
-                self.amount,
-                'draw',
-                self.amount
-            )
+                await db.balance(
+                    self.players[1],
+                    self.amount
+                )
 
-            return await interaction.response.edit_message(
-                embed=emb(
+                await db.record(
+                    self.players[0],
+                    'Tic-Tac-Toe',
+                    self.amount,
+                    'draw',
+                    self.amount
+                )
+
+                await db.record(
+                    self.players[1],
+                    'Tic-Tac-Toe',
+                    self.amount,
+                    'draw',
+                    self.amount
+                )
+
+                for child in self.children:
+                    child.disabled = True
+
+                embed = emb(
                     'Tic-Tac-Toe — Draw',
-                    f'Nobody won.\n\n'
+                    f'{self.board_text()}\n\n'
+                    f'🤝 The game ended in a draw.\n\n'
                     f'Both players were refunded '
                     f'**{money(self.amount)} points**.',
                     NAVY
-                ),
+                )
+
+                await interaction.response.edit_message(
+                    embed=embed,
+                    view=self
+                )
+
+                return
+
+            # -------------------------
+            # NEXT TURN
+            # -------------------------
+            self.turn = 1 - self.turn
+
+            await interaction.response.edit_message(
+                embed=self.board_embed(),
                 view=self
             )
 
-        # Next player's turn
-        self.turn = 1 - self.turn
+        except Exception as e:
+            print(f'TTT ERROR: {e}')
 
-        await interaction.response.edit_message(
-            embed=self.board_embed(),
-            view=self
-        )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    'Something went wrong with this TTT move.',
+                    ephemeral=True
+                )
 
     async def on_timeout(self):
-        if self.finished or not self.message:
+        if self.finished:
             return
 
         self.finished = True
 
-        loser = self.players[self.turn]
-        winner = self.players[1 - self.turn]
-
-        payout = (
-            self.amount * Decimal('2')
-        ).quantize(Decimal('0.01'))
-
-        await db.balance(winner, payout)
-
-        await db.record(
-            winner,
-            'Tic-Tac-Toe',
-            self.amount,
-            'win',
-            payout
+        # Refund both players if nobody finished the game
+        await db.balance(
+            self.players[0],
+            self.amount
         )
 
-        await db.record(
-            loser,
-            'Tic-Tac-Toe',
-            self.amount,
-            'loss',
-            Decimal('0')
+        await db.balance(
+            self.players[1],
+            self.amount
         )
 
-        await self.message.edit(
-            embed=emb(
-                'Tic-Tac-Toe — Time Out',
-                f'<@{loser}> ran out of time.\n\n'
-                f'<@{winner}> wins **{money(payout)} points**.',
-                GREEN
-            ),
-            view=None
-        )
+        for child in self.children:
+            child.disabled = True
+
+        if self.message:
+            await self.message.edit(
+                embed=emb(
+                    'Tic-Tac-Toe — Game Expired',
+                    f'{self.board_text()}\n\n'
+                    f'⏰ The game timed out.\n'
+                    f'Both players were refunded '
+                    f'**{money(self.amount)} points**.',
+                    RED
+                ),
+                view=self
+            )
         
 class MinesView(discord.ui.View):
     def __init__(self, author_id, amount, bombs, server, client, public_hash):
