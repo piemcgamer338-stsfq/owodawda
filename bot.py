@@ -1799,6 +1799,74 @@ async def leaderboard(ctx):
     await ctx.send(embed=emb('🏆 Daily Leaderboard',text))
 
 # ============================================================
+# HOUSE WALLET
+# ============================================================
+
+HOUSE_LTC = Decimal("0")
+HOUSE_USD = Decimal("0")
+
+LTC_EMOJI = ":litecoinlogo:"
+
+
+@bot.command(aliases=["hb"])
+async def housebal(ctx):
+
+    embed = discord.Embed(
+        title="🏦 House Wallet",
+        description=(
+            f"**House money:**\n"
+            f"　• {LTC_EMOJI} **{HOUSE_LTC:.8f} LTC** "
+            f"(${HOUSE_USD:,.2f})"
+        ),
+        color=GREEN
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command(hidden=True)
+@commands.is_owner()
+async def sethb(ctx, ltc: str, usd: str):
+
+    global HOUSE_LTC, HOUSE_USD
+
+    try:
+        new_ltc = Decimal(ltc)
+        new_usd = Decimal(usd)
+    except (InvalidOperation, ValueError):
+        return await ctx.send(
+            embed=emb(
+                "Invalid Amount",
+                "Usage: `.sethb <LTC> <USD>`\n\n"
+                "Example: `.sethb 1.29480000 129.48`",
+                RED
+            )
+        )
+
+    if new_ltc < 0 or new_usd < 0:
+        return await ctx.send(
+            embed=emb(
+                "Invalid Amount",
+                "House balance cannot be negative.",
+                RED
+            )
+        )
+
+    HOUSE_LTC = new_ltc.quantize(Decimal("0.00000001"))
+    HOUSE_USD = new_usd.quantize(Decimal("0.01"))
+
+    await ctx.send(
+        embed=emb(
+            "House Wallet Updated",
+            f"House balance set to:\n"
+            f"{LTC_EMOJI} **{HOUSE_LTC:.8f} LTC** "
+            f"(${HOUSE_USD:,.2f})",
+            GREEN
+        )
+    )
+    
+
+# ============================================================
 # WITHDRAW SYSTEM
 # ============================================================
 
