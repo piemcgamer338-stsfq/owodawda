@@ -380,9 +380,106 @@ async def coinflip(ctx, amount: str, choice: str=None):
     await asyncio.sleep(2); await finish(ctx,'Coinflip',amount,choice==landed,Decimal('1.92'),f'**Choice:** {choice.title()}\n**Landed:** {landed.title()}\n🔒 **Provably Fair**\nPublic Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
 @bot.command()
 async def ward(ctx, amount: Decimal):
-    if not await require_game(ctx,amount): return
-    a,b=random.randint(1,6),random.randint(1,6); await finish(ctx,'Ward Game',amount,a>b,Decimal('1.90'),f'**{ctx.author.display_name}** rolled: **{a}**\n**LiteBet** rolled: **{b}**')
-@bot.command()
+    # Validate bet
+    if amount <= 0:
+        return await ctx.send(
+            embed=emb(
+                'Invalid Bet',
+                'Bet amount must be greater than zero.',
+                RED
+            )
+        )
+
+    # Take the player's bet
+    if not await require_game(ctx, amount):
+        return
+
+    # Send rolling animation first
+    message = await ctx.send('<a:rollingdice:1538016308707201164>')
+
+    # Let the animation play
+    await asyncio.sleep(2.5)
+
+    # --------------------------------------------------
+    # WIN CHANCE
+    # --------------------------------------------------
+    # Bets above 100 points have a 30% player win chance.
+    # Bets 100 or below have a 50% player win chance.
+    if amount > Decimal('100'):
+        player_wins = random.random() < 0.30
+    else:
+        player_wins = random.random() < 0.50
+
+    # --------------------------------------------------
+    # GENERATE DICE THAT MATCH THE RESULT
+    # --------------------------------------------------
+    if player_wins:
+        # Player must beat LiteBet
+        player_roll = random.randint(2, 6)
+        litebet_roll = random.randint(1, player_roll - 1)
+
+    else:
+        # LiteBet must beat Player
+        litebet_roll = random.randint(2, 6)
+        player_roll = random.randint(1, litebet_roll - 1)
+
+    # --------------------------------------------------
+    # PAYOUT
+    # --------------------------------------------------
+    multiplier = Decimal('1.90')
+    won = player_roll > litebet_roll
+
+    if won:
+        payout = (amount * multiplier).quantize(Decimal('0.01'))
+
+        await db.record(
+            ctx.author.id,
+            'Ward Game',
+            amount,
+            'win',
+            payout
+        )
+
+        result_text = (
+            f'**{ctx.author.display_name}** won the pot of '
+            f'**{money(payout)} points!**\n\n'
+            f'**Player Rolled:** {player_roll}\n'
+            f'**LiteBet Rolled:** {litebet_roll}'
+        )
+
+        result_embed = emb(
+            '🎲 Ward Game — You Won!',
+            result_text,
+            GREEN
+        )
+
+    else:
+        await db.record(
+            ctx.author.id,
+            'Ward Game',
+            amount,
+            'loss',
+            Decimal('0')
+        )
+
+        result_text = (
+            f'**LiteBet** won the pot of '
+            f'**{money(amount * multiplier)} points!**\n\n'
+            f'**Player Rolled:** {player_roll}\n'
+            f'**LiteBet Rolled:** {litebet_roll}'
+        )
+
+        result_embed = emb(
+            '🎲 Ward Game — You Lost',
+            result_text,
+            RED
+        )
+
+    # Edit the original rolling message
+    await message.edit(
+        content=None,
+        embed=result_embed
+    )
 async def limbo(ctx, amount: Decimal, target: Decimal):
     if target<Decimal('1.01') or target>Decimal('100'): return await ctx.send(embed=emb('Invalid target','Choose a target from 1.01× to 100×.',RED))
     if not await require_game(ctx,amount): return
