@@ -387,9 +387,12 @@ async def ward(ctx, amount: Decimal):
         content=None,
         embed=result
     )
+    
 @bot.command()
 async def limbo(ctx, amount: Decimal, target: Decimal):
-    # Validate target
+    # -----------------------------
+    # VALIDATE TARGET
+    # -----------------------------
     if target < Decimal('1.01') or target > Decimal('100'):
         return await ctx.send(
             embed=emb(
@@ -399,43 +402,87 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
             )
         )
 
-    # Take the bet
+    # -----------------------------
+    # TAKE BET
+    # -----------------------------
     if not await require_game(ctx, amount):
         return
 
-    # Provably-fair seed generation
+    # -----------------------------
+    # PROVABLY FAIR SEEDS
+    # -----------------------------
     server_seed = secrets.token_hex(32)
     client_seed = secrets.token_hex(16)
-    public_hash = hashlib.sha256(server_seed.encode()).hexdigest()
 
-    # Generate deterministic random value from the seeds
-    hash_input = f'{server_seed}:{client_seed}'.encode()
-    digest = hashlib.sha256(hash_input).hexdigest()
+    public_hash = hashlib.sha256(
+        server_seed.encode()
+    ).hexdigest()
 
-    # Convert first 13 hex characters into a number between 0 and 1
-    random_value = int(digest[:13], 16) / float(0xFFFFFFFFFFFFFFF)
+    # -----------------------------
+    # CREATE DETERMINISTIC VALUE
+    # -----------------------------
+    hash_input = (
+        f'{server_seed}:{client_seed}'
+    ).encode()
 
-    # 4% house edge
+    digest = hashlib.sha256(
+        hash_input
+    ).hexdigest()
+
+    # Use 52 bits of the hash.
+    # This gives a very large range of possible results.
+    number = int(digest[:13], 16)
+
+    max_number = 0x10000000000000
+
+    random_value = Decimal(number) / Decimal(max_number)
+
+    # Never allow exactly 1
+    if random_value >= Decimal('1'):
+        random_value = Decimal('0.999999999999')
+
+    # -----------------------------
+    # LIMBO FORMULA
+    # 4% HOUSE EDGE
+    # -----------------------------
     house_edge = Decimal('0.96')
 
-    # Limbo crash calculation
-    if random_value >= 0.999999999999:
-        crashed = Decimal('100.00')
-    else:
-        crashed = house_edge / Decimal(str(1 - random_value))
-        crashed = crashed.quantize(Decimal('0.01'))
+    crashed = house_edge / (
+        Decimal('1') - random_value
+    )
 
-    # Keep the result inside the game's limits
-    if crashed < Decimal('1.00'):
-        crashed = Decimal('1.00')
+    # -----------------------------
+    # ROUND RESULT
+    # -----------------------------
+    crashed = crashed.quantize(
+        Decimal('0.01')
+    )
 
+    # Minimum visible crash
+    if crashed < Decimal('1.01'):
+        crashed = Decimal('1.01')
+
+    # Maximum game crash
     if crashed > Decimal('100.00'):
         crashed = Decimal('100.00')
 
+    # -----------------------------
+    # CHECK WIN
+    # -----------------------------
     won = crashed >= target
 
-    nonce = int(datetime.now(timezone.utc).timestamp())
+    # -----------------------------
+    # NONCE
+    # -----------------------------
+    nonce = int(
+        datetime.now(
+            timezone.utc
+        ).timestamp()
+    )
 
+    # -----------------------------
+    # RESULT DETAILS
+    # -----------------------------
     detail = (
         f'**Target:** {target:.2f}×\n'
         f'**Crashed:** {crashed:.2f}×\n\n'
@@ -446,6 +493,9 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
         f'Nonce: `{nonce}`'
     )
 
+    # -----------------------------
+    # FINISH GAME
+    # -----------------------------
     await finish(
         ctx,
         'Limbo',
@@ -455,7 +505,7 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
         detail,
         limbo_card(float(crashed))
     )
-
+    
 @bot.command(aliases=['bj'])
 async def blackjack(ctx, amount: Decimal):
     if not await require_game(ctx, amount):
