@@ -1209,6 +1209,481 @@ async def mines(ctx, amount: Decimal, bombs: int=4):
     await finish(ctx,'Mines',amount,won,mult,f'**Bet Amount:** {money(amount)}\n**Current Multiplier:** {mult:.2f}×\n**Profits:** {money(amount*(mult-1) if won else 0)} points\n{bombs} 💣 | {safe} 💎\n{grid}\n🔒 Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`')
 
 @bot.command()
+async def tower(ctx, amount: Decimal, difficulty: str = None):
+
+    difficulties = {
+        'easy': {
+            'slots': 4,
+            'bombs': 1,
+            'multipliers': [
+                Decimal('1.26'),
+                Decimal('1.59'),
+                Decimal('2.00'),
+                Decimal('2.52'),
+                Decimal('3.18'),
+                Decimal('4.00'),
+                Decimal('5.03'),
+                Decimal('6.35')
+            ]
+        },
+        'medium': {
+            'slots': 4,
+            'bombs': 2,
+            'multipliers': [
+                Decimal('1.30'),
+                Decimal('2.00'),
+                Decimal('2.84'),
+                Decimal('4.02'),
+                Decimal('5.77'),
+                Decimal('8.20'),
+                Decimal('11.54'),
+                Decimal('15.66')
+            ]
+        },
+        'hard': {
+            'slots': 2,
+            'bombs': 1,
+            'multipliers': [
+                Decimal('1.91'),
+                Decimal('3.65'),
+                Decimal('6.97'),
+                Decimal('13.31'),
+                Decimal('25.44'),
+                Decimal('48.50'),
+                Decimal('92.72'),
+                Decimal('150.00')
+            ]
+        }
+    }
+
+    if difficulty is None:
+
+        return await ctx.send(
+            embed=emb(
+                'Tower',
+                '**Choose a difficulty:**\n\n'
+                '💚 **Easy**\n'
+                '3 Diamonds • 1 Bomb\n'
+                '4 tiles per row\n\n'
+                '💛 **Medium**\n'
+                '2 Diamonds • 2 Bombs\n'
+                '4 tiles per row\n\n'
+                '❤️ **Hard**\n'
+                '1 Diamond • 1 Bomb\n'
+                '2 tiles per row\n\n'
+                'Usage:\n'
+                '` .tower 50 easy`\n'
+                '` .tower 50 medium`\n'
+                '` .tower 50 hard`',
+                NAVY
+            )
+        )
+
+    difficulty = difficulty.lower()
+
+    if difficulty not in difficulties:
+        return await ctx.send(
+            embed=emb(
+                'Invalid difficulty',
+                'Choose **easy**, **medium**, or **hard**.',
+                RED
+            )
+        )
+
+    if amount <= 0:
+        return await ctx.send(
+            embed=emb(
+                'Invalid bet',
+                'Bet amount must be greater than zero.',
+                RED
+            )
+        )
+
+    if not await require_game(ctx, amount):
+        return
+
+    config = difficulties[difficulty]
+
+    slots = config['slots']
+    bombs = config['bombs']
+    multipliers = config['multipliers']
+
+    # Create the tower.
+    rows = []
+
+    for _ in range(8):
+
+        row = ['diamond'] * (slots - bombs)
+        row += ['bomb'] * bombs
+
+        random.shuffle(row)
+        rows.append(row)
+
+    class TowerView(discord.ui.View):
+
+        def __init__(self):
+            super().__init__(timeout=180)
+
+            self.current_row = 0
+            self.finished = False
+            self.message = None
+
+        async def interaction_check(self, interaction):
+
+            if interaction.user.id != ctx.author.id:
+
+                await interaction.response.send_message(
+                    'Only the player who started this game can use these buttons.',
+                    ephemeral=True
+                )
+
+                return False
+
+            return True
+
+        def current_multiplier(self):
+
+            if self.current_row <= 0:
+                return Decimal('1.00')
+
+            return multipliers[self.current_row - 1]
+
+        def board_embed(self):
+
+            multiplier = self.current_multiplier()
+
+            next_multiplier = (
+                multipliers[self.current_row]
+                if self.current_row < 8
+                else multipliers[-1]
+            )
+
+            return emb(
+                f'Tower — {difficulty.title()}',
+                f'**Bet:** {money(amount)} points\n\n'
+                f'**Floor:** `{self.current_row + 1}/8`\n'
+                f'**Current:** `{multiplier:.2f}×`\n'
+                f'**Next:** `{next_multiplier:.2f}×`\n\n'
+                f'Choose a tile to climb the tower.',
+                NAVY
+            )
+
+        async def update_board(self, interaction):
+
+            path = tower_card(
+                rows,
+                self.current_row,
+                difficulty,
+                ctx.author.display_name
+            )
+
+            file = discord.File(
+                path,
+                filename='tower.png'
+            )
+
+            embed = self.board_embed()
+
+            embed.set_image(
+                url='attachment://tower.png'
+            )
+
+            await interaction.response.edit_message(
+                embed=embed,
+                attachments=[file],
+                view=self
+            )
+
+        async def lose(self, interaction):
+
+            if self.finished:
+                return
+
+            self.finished = True
+            self.stop()
+
+            for button in self.children:
+                button.disabled = True
+
+            path = tower_card(
+                rows,
+                8,
+                difficulty,
+                ctx.author.display_name
+            )
+
+            file = discord.File(
+                path,
+                filename='tower.png'
+            )
+
+            floor = self.current_row + 1
+
+            await db.record(
+                ctx.author.id,
+                'Tower',
+                amount,
+                'loss',
+                Decimal('0')
+            )
+
+            embed = emb(
+                'Tower — Boom!',
+                f'💣 You hit a bomb on **Floor {floor}**.\n\n'
+                f'**Lost:** {money(amount)} points',
+                RED
+            )
+
+            embed.set_image(
+                url='attachment://tower.png'
+            )
+
+            await interaction.response.edit_message(
+                embed=embed,
+                attachments=[file],
+                view=None
+            )
+
+        async def cashout(self, interaction):
+
+            if self.finished:
+                return
+
+            self.finished = True
+            self.stop()
+
+            for button in self.children:
+                button.disabled = True
+
+            multiplier = self.current_multiplier()
+
+            payout = (
+                amount * multiplier
+            ).quantize(
+                Decimal('0.01')
+            )
+
+            path = tower_card(
+                rows,
+                self.current_row,
+                difficulty,
+                ctx.author.display_name
+            )
+
+            file = discord.File(
+                path,
+                filename='tower.png'
+            )
+
+            await db.record(
+                ctx.author.id,
+                'Tower',
+                amount,
+                'win',
+                payout
+            )
+
+            embed = emb(
+                'Tower — Cashed Out!',
+                f'💰 **You cashed out!**\n\n'
+                f'**Floor:** {self.current_row}/8\n'
+                f'**Multiplier:** `{multiplier:.2f}×`\n'
+                f'**Payout:** {money(payout)} points',
+                GREEN
+            )
+
+            embed.set_image(
+                url='attachment://tower.png'
+            )
+
+            await interaction.response.edit_message(
+                embed=embed,
+                attachments=[file],
+                view=None
+            )
+
+        async def choose(self, interaction, column):
+
+            if self.finished:
+                return
+
+            if self.current_row >= 8:
+                return
+
+            result = rows[self.current_row][column]
+
+            if result == 'bomb':
+                await self.lose(interaction)
+                return
+
+            # Safe tile.
+            self.current_row += 1
+
+            # Reached the final floor.
+            if self.current_row >= 8:
+
+                self.finished = True
+                self.stop()
+
+                for button in self.children:
+                    button.disabled = True
+
+                multiplier = multipliers[-1]
+
+                payout = (
+                    amount * multiplier
+                ).quantize(
+                    Decimal('0.01')
+                )
+
+                path = tower_card(
+                    rows,
+                    8,
+                    difficulty,
+                    ctx.author.display_name
+                )
+
+                file = discord.File(
+                    path,
+                    filename='tower.png'
+                )
+
+                await db.record(
+                    ctx.author.id,
+                    'Tower',
+                    amount,
+                    'win',
+                    payout
+                )
+
+                embed = emb(
+                    'Tower — Completed!',
+                    f'🏆 **You reached Floor 8!**\n\n'
+                    f'**Multiplier:** `{multiplier:.2f}×`\n'
+                    f'**Payout:** {money(payout)} points',
+                    GREEN
+                )
+
+                embed.set_image(
+                    url='attachment://tower.png'
+                )
+
+                await interaction.response.edit_message(
+                    embed=embed,
+                    attachments=[file],
+                    view=None
+                )
+
+                return
+
+            await self.update_board(interaction)
+
+        @discord.ui.button(
+            label='1',
+            style=discord.ButtonStyle.primary
+        )
+        async def tile1(self, interaction, button):
+            await self.choose(interaction, 0)
+
+        @discord.ui.button(
+            label='2',
+            style=discord.ButtonStyle.primary
+        )
+        async def tile2(self, interaction, button):
+            await self.choose(interaction, 1)
+
+        @discord.ui.button(
+            label='3',
+            style=discord.ButtonStyle.primary
+        )
+        async def tile3(self, interaction, button):
+            await self.choose(interaction, 2)
+
+        @discord.ui.button(
+            label='4',
+            style=discord.ButtonStyle.primary
+        )
+        async def tile4(self, interaction, button):
+            await self.choose(interaction, 3)
+
+        @discord.ui.button(
+            label='Cashout',
+            style=discord.ButtonStyle.success
+        )
+        async def cashout_button(self, interaction, button):
+            await self.cashout(interaction)
+
+        async def on_timeout(self):
+
+            if self.finished:
+                return
+
+            self.finished = True
+            self.stop()
+
+            for button in self.children:
+                button.disabled = True
+
+            try:
+
+                if self.message:
+
+                    await self.message.edit(
+                        embed=emb(
+                            'Tower — Expired',
+                            f'You took too long to play.\n\n'
+                            f'**Lost:** {money(amount)} points',
+                            RED
+                        ),
+                        view=None
+                    )
+
+                    await db.record(
+                        ctx.author.id,
+                        'Tower',
+                        amount,
+                        'loss',
+                        Decimal('0')
+                    )
+
+            except Exception as e:
+                print(f'Tower timeout error: {e}')
+
+    view = TowerView()
+
+    # Disable buttons 3 and 4 on Hard.
+    if difficulty == 'hard':
+
+        view.tile3.disabled = True
+        view.tile4.disabled = True
+
+    path = tower_card(
+        rows,
+        0,
+        difficulty,
+        ctx.author.display_name
+    )
+
+    file = discord.File(
+        path,
+        filename='tower.png'
+    )
+
+    embed = view.board_embed()
+
+    embed.set_image(
+        url='attachment://tower.png'
+    )
+
+    message = await ctx.send(
+        embed=embed,
+        file=file,
+        view=view
+    )
+
+    view.message = message
+    
+@bot.command()
 async def rps(ctx, member: discord.Member, amount: Decimal):
     if member.bot or member==ctx.author: return await ctx.send(embed=emb('Invalid opponent','Choose another member.',RED))
     if not await require_game(ctx,amount) or not await db.take_bet(member.id,amount):
