@@ -263,9 +263,30 @@ async def rain(ctx, amount: Decimal, duration: int=60):
     view=RainView(ctx.author.id,amount,duration)
     msg=await ctx.send(embed=emb('🌧️ Points Rain',f'{ctx.author.mention} is raining **{money(amount)} points**!\n\nClick **Join Rain** within <t:{int((datetime.now(timezone.utc)+timedelta(seconds=duration)).timestamp())}:R>.\n\n**Requirement:** at least **50 lifetime deposited points**.'),view=view)
     view.message=msg
+
 @bot.command()
 async def rb(ctx):
-    u=await db.user(ctx.author.id); bonus=(Decimal(u['wagered'])*Decimal('.005')).quantize(Decimal('.01')); await db.balance(ctx.author.id,bonus); await ctx.send(embed=emb('Rateback claimed',f'You received **{money(bonus)} points** (0.50% of current lifetime wager).',GREEN))
+    rb = await db.claim_rateback(ctx.author.id)
+
+    if rb <= 0:
+        return await ctx.send(
+            embed=emb(
+                'Rateback',
+                'You have **0 points** available to claim.\n\n'
+                'You need to lose more points before claiming rateback again.',
+                RED
+            )
+        )
+
+    await ctx.send(
+        embed=emb(
+            'Rateback Claimed',
+            f'You received **{money(rb)} points**.\n\n'
+            'Your rateback balance has been reset. '
+            'Lose more points to earn rateback again.',
+            GREEN
+        )
+    )
 
 @bot.command()
 @commands.check(admin)
