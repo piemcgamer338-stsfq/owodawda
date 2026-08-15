@@ -464,8 +464,111 @@ async def vip(ctx, member: discord.Member=None):
     member=member or ctx.author; u=await db.user(member.id); await ctx.send(embed=emb('VIP Progress',f'**{member.display_name}** has wagered **{money(u["wagered"])} / 10,000** points for VIP access.'))
 @bot.command(aliases=['addy'])
 async def address(ctx, ltc_address: str):
-    if len(ltc_address)<20: return await ctx.send(embed=emb('Invalid Litecoin address','Please provide a valid Litecoin address.',RED))
-    await ctx.send(embed=emb('LTC Address Balance',f'**Address:** `{ltc_address}`\n**Balance:** External explorer lookup is configured through `LTC_EXPLORER_URL`.'))
+    if len(ltc_address) < 20:
+        return await ctx.send(
+            embed=emb(
+                'Invalid Litecoin Address',
+                'Please provide a valid Litecoin address.',
+                RED
+            )
+        )
+
+    import aiohttp
+
+    base_url = os.getenv('LTC_EXPLORER_URL')
+
+    if not base_url:
+        return await ctx.send(
+            embed=emb(
+                'Explorer Not Configured',
+                '`LTC_EXPLORER_URL` is missing from Railway Variables.',
+                RED
+            )
+        )
+
+    url = f'{base_url}/dashboards/address/{ltc_address}?limit=5,0'
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+
+                if response.status != 200:
+                    return await ctx.send(
+                        embed=emb(
+                            'Address Lookup Failed',
+                            f'Litecoin explorer returned HTTP `{response.status}`.',
+                            RED
+                        )
+                    )
+
+                data = await response.json()
+
+        if data.get('context', {}).get('error'):
+            return await ctx.send(
+                embed=emb(
+                    'Invalid Litecoin Address',
+                    'The Litecoin explorer could not find this address.',
+                    RED
+                )
+            )
+
+        address_data = data.get('data', {})
+
+        # Blockchair returns balance in litoshis
+        balance_litoshis = int(address_data.get('address', {}).get('balance', 0))
+        balance_ltc = Decimal(balance_litoshis) / Decimal('100000000')
+
+        transactions = address_data.get('transactions', [])
+
+        transaction_lines = []
+
+        for i, txid in enumerate(transactions[:5], 1):
+            short_tx = f'{txid[:10]}...{txid[-8:]}'
+
+            transaction_lines.append(
+                f'**{i}.** `{short_tx}`'
+            )
+
+        while len(transaction_lines) < 5:
+            transaction_lines.append(
+                f'**{len(transaction_lines) + 1}.** No transaction'
+            )
+
+        e = emb(
+            'Litecoin Address',
+            f'**Address:**\n`{ltc_address}`\n\n'
+            f'**LTC BALANCE:**\n'
+            f'`{balance_ltc:.8f} LTC`\n\n'
+            f'**Last 5 Transactions**\n'
+            + '\n'.join(transaction_lines)
+        )
+
+        e.set_footer(text='LiteBet • Litecoin Address Explorer')
+
+        await ctx.send(embed=e)
+
+    except asyncio.TimeoutError:
+        await ctx.send(
+            embed=emb(
+                'Explorer Timeout',
+                'The Litecoin explorer took too long to respond. Try again.',
+                RED
+            )
+        )
+
+    except Exception as error:
+        print(f'LTC address lookup error: {error}')
+
+        await ctx.send(
+            embed=emb(
+                'Address Lookup Error',
+                'Something went wrong while checking the Litecoin address.',
+                RED
+            )
+        )
 @bot.command(aliases=['depo'])
 async def deposit(ctx):
     xpub=os.getenv('LTC_XPUB')
