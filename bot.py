@@ -1735,12 +1735,82 @@ async def address(ctx, ltc_address: str):
     await ctx.send(embed=emb('LTC Address Balance',f'**Address:** `{ltc_address}`\n**Balance:** External explorer lookup is configured through `LTC_EXPLORER_URL`.'))
 @bot.command(aliases=['depo'])
 async def deposit(ctx):
-    xpub=os.getenv('LTC_XPUB')
-    if not xpub: return await ctx.send(embed=emb('Deposit unavailable','The owner has not configured `LTC_XPUB` yet.',RED))
-    u=await db.user(ctx.author.id)
-    await ctx.send(embed=emb('Litecoin Deposit',f'Your unique watch-only deposit address will use index **{u["deposit_index"]}**. Configure the wallet watcher before accepting deposits.\n\nFor safety, no private key is stored by LiteBet.'))
-@bot.command()
-async def withdraw(ctx, address: str, amount: Decimal):
+    from bip_utils import Bip44, Bip44Coins, Bip44Changes
+
+    xpub = os.getenv("LTC_XPUB")
+
+    if not xpub:
+        return await ctx.send(
+            embed=emb(
+                "Deposit unavailable",
+                "The owner has not configured `LTC_XPUB` yet.",
+                RED
+            )
+        )
+
+    try:
+        u = await db.user(ctx.author.id)
+
+        # Reuse the same address if this user already has one
+        if u["deposit_address"]:
+            address = u["deposit_address"]
+
+        else:
+            index = int(u["deposit_index"])
+
+            # Load Litecoin account XPUB
+            wallet = Bip44.FromExtendedKey(
+                xpub,
+                Bip44Coins.LITECOIN
+            )
+
+            # Derive external address:
+            # ... / 0 / index
+            address = (
+                wallet
+                .Change(Bip44Changes.CHAIN_EXT)
+                .AddressIndex(index)
+                .PublicKey()
+                .ToAddress()
+            )
+
+            # Save address and advance index
+            async with db.pool.acquire() as c:
+                await c.execute(
+                    """
+                    UPDATE users
+                    SET deposit_address = $2,
+                        deposit_index = deposit_index + 1
+                    WHERE user_id = $1
+                    """,
+                    ctx.author.id,
+                    address
+                )
+
+        await ctx.send(
+            embed=emb(
+                "Litecoin Deposit",
+                f"Send **LTC** to the address below:\n\n"
+                f"```{address}```\n\n"
+                f"**Network:** Litecoin Mainnet\n"
+                f"**Currency:** LTC\n\n"
+                f"Your deposit will be credited after the required "
+                f"confirmations.",
+                GREEN
+            )
+        )
+
+    except Exception as e:
+        print(f"Deposit address error: {e}")
+
+        await ctx.send(
+            embed=emb(
+                "Deposit Error",
+                "I couldn't generate your Litecoin deposit address.\n"
+                "Please contact the owner.",
+                RED
+            )
+        )
     if amount<50: return await ctx.send(embed=emb('Minimum withdrawal','Minimum withdrawal is **50 points**.',RED))
     if await db.frozen(): return await ctx.send(embed=emb('Withdrawals are frozen','An administrator has temporarily locked withdrawals.',RED))
     if not await db.debit(ctx.author.id,amount): return await ctx.send(embed=emb('Insufficient balance','You do not have enough points.',RED))
