@@ -7,6 +7,9 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from db import Database
 from imaging import balance_card, limbo_card, blackjack_card, coinflip_card, hilo_card
+from english_words import get_english_words_set
+
+ENGLISH_WORDS = get_english_words_set(['web2'], lower=True)
 
 load_dotenv()
 TOKEN=os.getenv('DISCORD_TOKEN'); DB_URL=os.getenv('DATABASE_URL'); LOG_CHANNEL_ID=int(os.getenv('LOG_CHANNEL_ID','0'))
