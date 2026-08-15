@@ -83,6 +83,241 @@ class HiloView(discord.ui.View):
             mult=Decimal('1')+Decimal(self.streak)*Decimal('.20'); await db.record(self.author_id,'Hi-Lo',self.amount,'win',(self.amount*mult).quantize(Decimal('.01')))
             await self.message.edit(embed=result_embed('Hi-Lo',self.amount,True,mult,'Auto-cashed out after timeout.'),view=None)
 
+class TttView(discord.ui.View):
+    def __init__(self, first_id, second_id, amount):
+        super().__init__(timeout=180)
+
+        self.players = [first_id, second_id]
+        self.amount = amount
+        self.turn = 0
+        self.board = [''] * 9
+        self.message = None
+        self.finished = False
+
+        for i in range(9):
+            button = discord.ui.Button(
+                label=' ',
+                style=discord.ButtonStyle.secondary,
+                row=i // 3,
+                custom_id=f'ttt:{i}'
+            )
+
+            button.callback = self.move
+            self.add_item(button)
+
+    def board_embed(self, note=''):
+        current_player = self.players[self.turn]
+        symbol = 'X' if self.turn == 0 else 'O'
+
+        description = (
+            f'<@{self.players[0]}> is **X**\n'
+            f'<@{self.players[1]}> is **O**\n\n'
+        )
+
+        if note:
+            description += f'{note}\n\n'
+
+        description += (
+            f'It is <@{current_player}>\'s turn '
+            f'(**{symbol}**).\n\n'
+            f'**Pot:** {money(self.amount * 2)} points'
+        )
+
+        return emb(
+            'Tic-Tac-Toe',
+            description,
+            NAVY
+        )
+
+    async def interaction_check(self, interaction):
+        if self.finished:
+            await interaction.response.send_message(
+                'This game has already ended.',
+                ephemeral=True
+            )
+            return False
+
+        if interaction.user.id != self.players[self.turn]:
+            await interaction.response.send_message(
+                'It is not your turn.',
+                ephemeral=True
+            )
+            return False
+
+        return True
+
+    async def move(self, interaction):
+        index = int(
+            interaction.data['custom_id'].split(':')[1]
+        )
+
+        if self.board[index]:
+            return await interaction.response.send_message(
+                'That square is already taken.',
+                ephemeral=True
+            )
+
+        mark = 'X' if self.turn == 0 else 'O'
+        self.board[index] = mark
+
+        button = next(
+            x for x in self.children
+            if x.custom_id == interaction.data['custom_id']
+        )
+
+        button.label = mark
+        button.disabled = True
+
+        if mark == 'X':
+            button.style = discord.ButtonStyle.primary
+        else:
+            button.style = discord.ButtonStyle.success
+
+        wins = (
+            (0, 1, 2),
+            (3, 4, 5),
+            (6, 7, 8),
+            (0, 3, 6),
+            (1, 4, 7),
+            (2, 5, 8),
+            (0, 4, 8),
+            (2, 4, 6)
+        )
+
+        # Check winner
+        if any(
+            all(self.board[i] == mark for i in line)
+            for line in wins
+        ):
+            self.finished = True
+            self.stop()
+
+            winner = self.players[self.turn]
+            loser = self.players[1 - self.turn]
+
+            payout = (
+                self.amount * Decimal('2')
+            ).quantize(Decimal('0.01'))
+
+            await db.balance(winner, payout)
+
+            await db.record(
+                winner,
+                'Tic-Tac-Toe',
+                self.amount,
+                'win',
+                payout
+            )
+
+            await db.record(
+                loser,
+                'Tic-Tac-Toe',
+                self.amount,
+                'loss',
+                Decimal('0')
+            )
+
+            return await interaction.response.edit_message(
+                embed=emb(
+                    'Tic-Tac-Toe — Game Over',
+                    f'<@{winner}> won the game!\n\n'
+                    f'**Prize:** {money(payout)} points',
+                    GREEN
+                ),
+                view=self
+            )
+
+        # Check draw
+        if all(self.board):
+            self.finished = True
+            self.stop()
+
+            await db.balance(
+                self.players[0],
+                self.amount
+            )
+
+            await db.balance(
+                self.players[1],
+                self.amount
+            )
+
+            await db.record(
+                self.players[0],
+                'Tic-Tac-Toe',
+                self.amount,
+                'draw',
+                self.amount
+            )
+
+            await db.record(
+                self.players[1],
+                'Tic-Tac-Toe',
+                self.amount,
+                'draw',
+                self.amount
+            )
+
+            return await interaction.response.edit_message(
+                embed=emb(
+                    'Tic-Tac-Toe — Draw',
+                    f'Nobody won.\n\n'
+                    f'Both players were refunded '
+                    f'**{money(self.amount)} points**.',
+                    NAVY
+                ),
+                view=self
+            )
+
+        # Next player's turn
+        self.turn = 1 - self.turn
+
+        await interaction.response.edit_message(
+            embed=self.board_embed(),
+            view=self
+        )
+
+    async def on_timeout(self):
+        if self.finished or not self.message:
+            return
+
+        self.finished = True
+
+        loser = self.players[self.turn]
+        winner = self.players[1 - self.turn]
+
+        payout = (
+            self.amount * Decimal('2')
+        ).quantize(Decimal('0.01'))
+
+        await db.balance(winner, payout)
+
+        await db.record(
+            winner,
+            'Tic-Tac-Toe',
+            self.amount,
+            'win',
+            payout
+        )
+
+        await db.record(
+            loser,
+            'Tic-Tac-Toe',
+            self.amount,
+            'loss',
+            Decimal('0')
+        )
+
+        await self.message.edit(
+            embed=emb(
+                'Tic-Tac-Toe — Time Out',
+                f'<@{loser}> ran out of time.\n\n'
+                f'<@{winner}> wins **{money(payout)} points**.',
+                GREEN
+            ),
+            view=None
+        )
+        
 class MinesView(discord.ui.View):
     def __init__(self, author_id, amount, bombs, server, client, public_hash):
         super().__init__(timeout=120); self.author_id=author_id; self.amount=amount; self.bombs=bombs; self.mines=set(random.sample(range(25),bombs)); self.revealed=0; self.server=server; self.client=client; self.public_hash=public_hash; self.message=None
@@ -540,12 +775,78 @@ async def rps(ctx, member: discord.Member, amount: Decimal):
 
 @bot.command()
 async def ttt(ctx, member: discord.Member, amount: Decimal):
-    if member.bot or member==ctx.author: return await ctx.send(embed=emb('Invalid opponent','Choose another member.',RED))
-    if not await require_game(ctx,amount) or not await db.take_bet(member.id,amount):
-        await db.balance(ctx.author.id,amount); return await ctx.send(embed=emb('Challenge unavailable','Both players need the bet amount.',RED))
-    winner=random.choice([ctx.author,member]); await db.balance(winner.id,amount*2)
-    await ctx.send(embed=emb('Tic-Tac-Toe',f'🎮 {ctx.author.mention} (❌) vs {member.mention} (⭕)\nWinner: {winner.mention}\nPrize: **{money(amount*2)} points**',GREEN))
+    if member.bot or member == ctx.author:
+        return await ctx.send(
+            embed=emb(
+                'Invalid Challenge',
+                'Choose another real member.',
+                RED
+            )
+        )
 
+    if amount <= 0:
+        return await ctx.send(
+            embed=emb(
+                'Invalid Bet',
+                'The bet must be greater than zero.',
+                RED
+            )
+        )
+
+    if member.id == ctx.author.id:
+        return await ctx.send(
+            embed=emb(
+                'Invalid Challenge',
+                'You cannot challenge yourself.',
+                RED
+            )
+        )
+
+    host = await db.user(ctx.author.id)
+    guest = await db.user(member.id)
+
+    if Decimal(host['balance']) < amount:
+        return await ctx.send(
+            embed=emb(
+                'Insufficient Balance',
+                f'You need **{money(amount)} points** to make this challenge.',
+                RED
+            )
+        )
+
+    if Decimal(guest['balance']) < amount:
+        return await ctx.send(
+            embed=emb(
+                'Challenge Unavailable',
+                f'{member.mention} does not have enough points for this bet.',
+                RED
+            )
+        )
+
+    view = DuelInviteView(
+        ctx.author.id,
+        member.id,
+        amount,
+        'Tic-Tac-Toe'
+    )
+
+    message = await ctx.send(
+        embed=emb(
+            'Tic-Tac-Toe Challenge',
+            f'{ctx.author.mention} challenged {member.mention} '
+            f'for **{money(amount)} points**.\n\n'
+            f'**{ctx.author.display_name}:** '
+            f'{money(host["balance"])} points\n'
+            f'**{member.display_name}:** '
+            f'{money(guest["balance"])} points\n\n'
+            f'{member.mention}, click **Accept** or **Decline**.',
+            NAVY
+        ),
+        view=view
+    )
+
+    view.message = message
+    
 @bot.command()
 async def word(ctx, amount: Decimal, member: discord.Member=None):
     if not await require_game(ctx,amount): return
