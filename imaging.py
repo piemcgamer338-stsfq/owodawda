@@ -715,3 +715,84 @@ def hilo_card(
         im,
         "hilo.png"
     )
+
+def tower_card(rows, current_row, mode, username):
+    W, H = 900, 1050
+    im = Image.new("RGB", (W, H), "#101827")
+    d = ImageDraw.Draw(im)
+
+    d.text(
+        (45, 30),
+        "LiteBet Tower",
+        font=font(38, True),
+        fill="#f3f6f3"
+    )
+
+    d.text(
+        (45, 78),
+        f"{username} • {mode.title()}",
+        font=font(22),
+        fill="#93a4be"
+    )
+
+    cols = len(rows[0])
+    tile = 105
+    gap = 15
+    board_w = cols * tile + (cols - 1) * gap
+    start_x = (W - board_w) // 2
+    start_y = 145
+
+    for row_index, row in enumerate(rows):
+        y = start_y + (7 - row_index) * 105
+
+        for col_index, value in enumerate(row):
+            x = start_x + col_index * (tile + gap)
+
+            if row_index < current_row:
+                if value == "diamond":
+                    fill = "#218c74"
+                    symbol = "◆"
+                else:
+                    fill = "#8f4850"
+                    symbol = "●"
+
+                d.rounded_rectangle(
+                    (x, y, x + tile, y + tile),
+                    radius=12,
+                    fill=fill
+                )
+
+                f = font(45, True)
+                box = d.textbbox((0, 0), symbol, font=f)
+                d.text(
+                    (
+                        x + (tile - (box[2] - box[0])) / 2,
+                        y + 25
+                    ),
+                    symbol,
+                    font=f,
+                    fill="#ffffff"
+                )
+
+            else:
+                d.rounded_rectangle(
+                    (x, y, x + tile, y + tile),
+                    radius=12,
+                    fill="#34475e"
+                )
+
+                d.text(
+                    (x + 40, y + 28),
+                    "?",
+                    font=font(42, True),
+                    fill="#aebdcd"
+                )
+
+    d.text(
+        (45, 955),
+        "💎 = Safe     💣 = Bomb",
+        font=font(25, True),
+        fill="#dbe5ef"
+    )
+
+    return save(im, "tower.png")
