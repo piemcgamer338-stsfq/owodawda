@@ -514,7 +514,6 @@ async def blackjack(ctx, amount: Decimal):
     ranks = list('23456789') + ['10', 'J', 'Q', 'K', 'A']
     suits = ['S', 'H', 'D', 'C']
 
-    # Create a proper shuffled deck
     deck = [(rank, suit) for rank in ranks for suit in suits]
     random.shuffle(deck)
 
@@ -525,6 +524,7 @@ async def blackjack(ctx, amount: Decimal):
             return 11
         if rank in ('J', 'Q', 'K'):
             return 10
+
         return int(rank)
 
     def hand_value(hand):
@@ -541,120 +541,231 @@ async def blackjack(ctx, amount: Decimal):
     dealer = [deck.pop(), deck.pop()]
 
     class BlackjackView(discord.ui.View):
+
         def __init__(self):
             super().__init__(timeout=180)
+
             self.finished = False
             self.message = None
 
-        def player_total(self):
-            return hand_value(player)
-
-        def dealer_total(self):
-            return hand_value(dealer)
-
-        def current_embed(self):
-            pv = self.player_total()
-
-            dealer_visible = card_value(dealer[0])
-
-            # Show dealer's first card, hide second card
-            description = (
-                f'**Bet:** {money(amount)} points\n\n'
-                f'🎴 **Dealer:** `{dealer[0][0]}{dealer[0][1]}` '
-                f'`??`\n'
-                f'**Dealer visible total:** `{dealer_visible}`\n\n'
-                f'🃏 **Your hand:** '
-                f'{" ".join(f"`{r}{s}`" for r, s in player)}\n'
-                f'**Your total:** `{pv}`\n\n'
-                'Choose **Hit** or **Stand**.'
-            )
-
-            return emb(
-                'Blackjack',
-                description
-            )
-
         async def interaction_check(self, interaction):
+
             if interaction.user.id != ctx.author.id:
                 await interaction.response.send_message(
-                    'Only the player who started this Blackjack game can use these buttons.',
+                    'Only the player who started this game can use these buttons.',
                     ephemeral=True
                 )
                 return False
 
             return True
 
+        def game_embed(self):
+
+            pv = hand_value(player)
+            dealer_visible = card_value(dealer[0])
+
+            return emb(
+                'Blackjack',
+                f'**Bet:** {money(amount)} points\n\n'
+                f'🎴 **Dealer:** `{dealer[0][0]}{dealer[0][1]}` `??`\n'
+                f'**Dealer visible total:** `{dealer_visible}`\n\n'
+                f'🃏 **Your hand:** '
+                f'{" ".join(f"`{r}{s}`" for r, s in player)}\n'
+                f'**Your total:** `{pv}`\n\n'
+                f'Choose **Hit** or **Stand**.'
+            )
+
+        def image_cards(self, finished=False):
+
+            if finished:
+                return player, dealer
+
+            # Hide dealer's second card while game is running
+            hidden_dealer = [
+                dealer[0],
+                ('?', '?')
+            ]
+
+            return player, hidden_dealer
+
+        async def update_game(self, interaction):
+
+            pv = hand_value(player)
+
+            image_player, image_dealer = self.image_cards(False)
+
+            try:
+                image_path = blackjack_card(
+                    ctx.author.display_name,
+                    image_player,
+                    image_dealer
+                )
+
+                file = discord.File(
+                    image_path,
+                    filename='blackjack.png'
+                )
+
+                embed = self.game_embed()
+
+                embed.set_image(
+                    url='attachment://blackjack.png'
+                )
+
+                await interaction.response.edit_message(
+                    embed=embed,
+                    attachments=[file],
+                    view=self
+                )
+
+            except Exception as e:
+
+                print(f'Blackjack image error: {e}')
+
+                await interaction.response.edit_message(
+                    embed=self.game_embed(),
+                    view=self
+                )
+
         async def finish_game(self, interaction):
+
             if self.finished:
                 return
 
             self.finished = True
             self.stop()
 
-            # Disable all buttons
+            # Disable buttons
             for button in self.children:
                 button.disabled = True
 
-            pv = self.player_total()
+            pv = hand_value(player)
 
-            # Dealer draws until 17+
-            while self.dealer_total() < 17:
+            # Dealer plays
+            while hand_value(dealer) < 17:
                 dealer.append(deck.pop())
 
-            dv = self.dealer_total()
+            dv = hand_value(dealer)
 
-            # Determine result
+            # -----------------------------
+            # RESULT
+            # -----------------------------
+
             if pv > 21:
+
                 won = False
-                multiplier = Decimal('0')
-                outcome = '💥 **Bust!** Your hand went over 21.'
+                payout = Decimal('0')
+
+                title = 'Blackjack — Bust!'
+                colour = RED
+
+                result = (
+                    '💥 **You busted!**\n'
+                    'Your total went over 21.'
+                )
+
+                result_type = 'loss'
 
             elif dv > 21:
+
                 won = True
-                multiplier = Decimal('1.95')
-                outcome = '🎉 **Dealer busted!**'
+                payout = (
+                    amount * Decimal('1.95')
+                ).quantize(Decimal('0.01'))
+
+                title = 'Blackjack — You Win!'
+                colour = GREEN
+
+                result = (
+                    '🎉 **Dealer busted!**\n'
+                    f'🎊 **Payout: {money(payout)} points**'
+                )
+
+                result_type = 'win'
 
             elif pv > dv:
+
                 won = True
-                multiplier = Decimal('1.95')
-                outcome = '🏆 **You beat the dealer!**'
+                payout = (
+                    amount * Decimal('1.95')
+                ).quantize(Decimal('0.01'))
+
+                title = 'Blackjack — You Win!'
+                colour = GREEN
+
+                result = (
+                    '🏆 **You beat the dealer!**\n\n'
+                    f'🎊 **Payout: {money(payout)} points**'
+                )
+
+                result_type = 'win'
 
             elif pv < dv:
+
                 won = False
-                multiplier = Decimal('0')
-                outcome = '💀 **Dealer wins!**'
+                payout = Decimal('0')
+
+                title = 'Blackjack — Dealer Wins'
+                colour = RED
+
+                result = (
+                    '💀 **Dealer wins.**'
+                )
+
+                result_type = 'loss'
 
             else:
-                # Tie = refund
+
                 won = False
-                multiplier = Decimal('1')
-                outcome = '🤝 **Push!** Your bet was refunded.'
+                payout = amount
 
-            payout = (
-                amount * multiplier
-            ).quantize(
-                Decimal('0.01')
-            )
+                title = 'Blackjack — Push!'
+                colour = NAVY
 
-            # Refund on push
-            if multiplier == Decimal('1'):
+                result = (
+                    '🤝 **Push!**\n'
+                    f'Your **{money(amount)} points** bet was refunded.'
+                )
+
+                result_type = 'push'
+
                 await db.balance(
                     ctx.author.id,
                     amount
                 )
 
-            # Record exactly once
+            # -----------------------------
+            # DATABASE
+            # -----------------------------
+
             await db.record(
                 ctx.author.id,
                 'Blackjack',
                 amount,
-                'win' if won else 'loss',
-                payout
+                result_type,
+                payout if result_type == 'win'
+                else Decimal('0')
             )
 
-            final_embed = emb(
-                f'Blackjack — {"You Won!" if won else "You Lost!" if multiplier == Decimal("0") else "Push!"}',
-                (
+            # -----------------------------
+            # FINAL IMAGE
+            # -----------------------------
+
+            try:
+
+                image_path = blackjack_card(
+                    ctx.author.display_name,
+                    player,
+                    dealer
+                )
+
+                file = discord.File(
+                    image_path,
+                    filename='blackjack.png'
+                )
+
+                final_embed = emb(
+                    title,
                     f'**Bet:** {money(amount)} points\n\n'
                     f'🃏 **Your hand:** '
                     f'{" ".join(f"`{r}{s}`" for r, s in player)}\n'
@@ -662,43 +773,34 @@ async def blackjack(ctx, amount: Decimal):
                     f'🎴 **Dealer hand:** '
                     f'{" ".join(f"`{r}{s}`" for r, s in dealer)}\n'
                     f'**Dealer total:** `{dv}`\n\n'
-                    f'{outcome}\n\n'
-                    + (
-                        f'🎉 **Payout: {money(payout)} points**'
-                        if won
-                        else
-                        '💰 **Your bet was refunded.**'
-                        if multiplier == Decimal('1')
-                        else
-                        'Better luck next time.'
-                    )
-                ),
-                GREEN if won else NAVY if multiplier == Decimal('1') else RED
-            )
-
-            try:
-                image = blackjack_card(
-                    ctx.author.display_name,
-                    player,
-                    dealer
+                    f'{result}',
+                    colour
                 )
 
                 final_embed.set_image(
-                    url=f'attachment://{image.name}'
+                    url='attachment://blackjack.png'
                 )
 
                 await interaction.response.edit_message(
                     embed=final_embed,
-                    attachments=[discord.File(image)],
-                    view=self
+                    attachments=[file],
+                    view=None
                 )
 
             except Exception as e:
-                print(f'Blackjack image error: {e}')
+
+                print(f'Blackjack final image error: {e}')
 
                 await interaction.response.edit_message(
-                    embed=final_embed,
-                    view=self
+                    embed=emb(
+                        title,
+                        f'**Bet:** {money(amount)} points\n\n'
+                        f'Your total: **{pv}**\n'
+                        f'Dealer total: **{dv}**\n\n'
+                        f'{result}',
+                        colour
+                    ),
+                    view=None
                 )
 
         @discord.ui.button(
@@ -707,24 +809,19 @@ async def blackjack(ctx, amount: Decimal):
             style=discord.ButtonStyle.primary
         )
         async def hit(self, interaction, button):
+
             if self.finished:
                 return
 
             player.append(deck.pop())
-            pv = self.player_total()
 
-            if pv > 21:
+            pv = hand_value(player)
+
+            if pv >= 21:
                 await self.finish_game(interaction)
                 return
 
-            if pv == 21:
-                await self.finish_game(interaction)
-                return
-
-            await interaction.response.edit_message(
-                embed=self.current_embed(),
-                view=self
-            )
+            await self.update_game(interaction)
 
         @discord.ui.button(
             label='Stand',
@@ -732,45 +829,45 @@ async def blackjack(ctx, amount: Decimal):
             style=discord.ButtonStyle.success
         )
         async def stand(self, interaction, button):
+
             if self.finished:
                 return
 
             await self.finish_game(interaction)
 
         async def on_timeout(self):
+
             if self.finished:
                 return
 
             self.finished = True
             self.stop()
 
-            # Timeout counts as a loss.
-            await db.record(
-                ctx.author.id,
-                'Blackjack',
-                amount,
-                'loss',
-                Decimal('0')
-            )
+            for button in self.children:
+                button.disabled = True
 
             try:
+
                 if self.message:
+
                     await self.message.edit(
                         embed=emb(
-                            'Blackjack — Game Expired',
-                            f'You did not make a move in time.\n\n'
-                            f'**Bet:** {money(amount)} points\n\n'
-                            'Your bet was lost.',
+                            'Blackjack — Expired',
+                            'You took too long to make a move.\n\n'
+                            f'**Bet lost:** {money(amount)} points',
                             RED
                         ),
                         view=None
                     )
+
             except Exception as e:
+
                 print(f'Blackjack timeout error: {e}')
 
-    view = BlackjackView()
+    # -----------------------------
+    # NATURAL BLACKJACK
+    # -----------------------------
 
-    # Natural blackjack
     player_blackjack = (
         len(player) == 2
         and hand_value(player) == 21
@@ -781,15 +878,14 @@ async def blackjack(ctx, amount: Decimal):
         and hand_value(dealer) == 21
     )
 
+    # Natural blackjack immediately ends
     if player_blackjack or dealer_blackjack:
-        view.finished = True
-        view.stop()
 
         if player_blackjack and not dealer_blackjack:
-            multiplier = Decimal('2.00')
-            payout = (amount * multiplier).quantize(
-                Decimal('0.01')
-            )
+
+            payout = (
+                amount * Decimal('2.00')
+            ).quantize(Decimal('0.01'))
 
             await db.record(
                 ctx.author.id,
@@ -801,12 +897,14 @@ async def blackjack(ctx, amount: Decimal):
 
             title = 'Blackjack — Natural Blackjack!'
             colour = GREEN
-            result_text = (
-                f'🎉 **Natural Blackjack!**\n\n'
-                f'Payout: **{money(payout)} points**'
+
+            result = (
+                '🎉 **Natural Blackjack!**\n\n'
+                f'🎊 **Payout: {money(payout)} points**'
             )
 
         elif dealer_blackjack and not player_blackjack:
+
             payout = Decimal('0')
 
             await db.record(
@@ -819,9 +917,11 @@ async def blackjack(ctx, amount: Decimal):
 
             title = 'Blackjack — Dealer Blackjack'
             colour = RED
-            result_text = '💀 **Dealer has Blackjack.**'
+
+            result = '💀 **Dealer has Blackjack.**'
 
         else:
+
             await db.balance(
                 ctx.author.id,
                 amount
@@ -831,59 +931,105 @@ async def blackjack(ctx, amount: Decimal):
                 ctx.author.id,
                 'Blackjack',
                 amount,
-                'loss',
+                'push',
                 Decimal('0')
             )
 
             title = 'Blackjack — Push!'
             colour = NAVY
-            result_text = '🤝 **Both players have Blackjack. Your bet was refunded.**'
 
-        final_embed = emb(
-            title,
-            (
-                f'**Bet:** {money(amount)} points\n\n'
-                f'🃏 **Your hand:** '
-                f'{" ".join(f"`{r}{s}`" for r, s in player)}\n'
-                f'**Your total:** `{hand_value(player)}`\n\n'
-                f'🎴 **Dealer hand:** '
-                f'{" ".join(f"`{r}{s}`" for r, s in dealer)}\n'
-                f'**Dealer total:** `{hand_value(dealer)}`\n\n'
-                f'{result_text}'
-            ),
-            colour
-        )
+            result = (
+                '🤝 **Both have Blackjack!**\n'
+                f'Your **{money(amount)} points** were refunded.'
+            )
 
         try:
-            image = blackjack_card(
+
+            image_path = blackjack_card(
                 ctx.author.display_name,
                 player,
                 dealer
             )
 
-            final_embed.set_image(
-                url=f'attachment://{image.name}'
+            file = discord.File(
+                image_path,
+                filename='blackjack.png'
             )
 
-            await ctx.send(
+            final_embed = emb(
+                title,
+                f'**Bet:** {money(amount)} points\n\n'
+                f'🃏 **Your total:** `{hand_value(player)}`\n'
+                f'🎴 **Dealer total:** `{hand_value(dealer)}`\n\n'
+                f'{result}',
+                colour
+            )
+
+            final_embed.set_image(
+                url='attachment://blackjack.png'
+            )
+
+            return await ctx.send(
                 embed=final_embed,
-                file=discord.File(image)
+                file=file
             )
 
         except Exception as e:
+
             print(f'Blackjack image error: {e}')
-            await ctx.send(embed=final_embed)
 
-        return
+            return await ctx.send(
+                embed=emb(
+                    title,
+                    result,
+                    colour
+                )
+            )
 
-    # Normal game
-    message = await ctx.send(
-        embed=view.current_embed(),
-        view=view
-    )
+    # -----------------------------
+    # START GAME WITH IMAGE
+    # -----------------------------
+
+    view = BlackjackView()
+
+    image_player, image_dealer = view.image_cards(False)
+
+    try:
+
+        image_path = blackjack_card(
+            ctx.author.display_name,
+            image_player,
+            image_dealer
+        )
+
+        file = discord.File(
+            image_path,
+            filename='blackjack.png'
+        )
+
+        starting_embed = view.game_embed()
+
+        starting_embed.set_image(
+            url='attachment://blackjack.png'
+        )
+
+        message = await ctx.send(
+            embed=starting_embed,
+            file=file,
+            view=view
+        )
+
+    except Exception as e:
+
+        print(f'Blackjack starting image error: {e}')
+
+        message = await ctx.send(
+            embed=view.game_embed(),
+            view=view
+        )
 
     view.message = message
-
+    
 @bot.command()
 async def hilo(ctx, amount: Decimal):
     if not await require_game(ctx,amount): return
