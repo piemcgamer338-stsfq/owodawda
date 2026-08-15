@@ -146,7 +146,7 @@ async def deposit(ctx):
                         bip_obj = Bip44.FromExtendedKey(xpub, Bip44Coins.LITECOIN)
                         address = bip_obj.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
                     except Exception:
-                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (xpu[...]
+                        return await ctx.send(embed=emb('Derivation error', 'Could not derive an address from the configured LTC_XPUB. Ensure LTC_XPUB is a valid Litecoin extended public key (xpu).', RED))
 
                     await conn.execute("UPDATE users SET deposit_address=$2, deposit_index=deposit_index+1 WHERE user_id=$1", ctx.author.id, address)
 
@@ -173,7 +173,7 @@ async def withdraw(ctx, address: str, amount: Decimal):
     ltc=(amount*RATE).quantize(Decimal('.00000001'))
     async with db.pool.acquire() as c:
         req=await c.fetchrow('INSERT INTO withdrawals(user_id,address,points,ltc) VALUES($1,$2,$3,$4) RETURNING id',ctx.author.id,address,amount,ltc)
-    await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${amount*USD_PER_POINT:.2f})!'))
+    await ctx.send(embed=emb('Withdrawal requested',f'🎉 `{ctx.author.display_name}` has successfully withdrawn **{money(amount)}** points for **{ltc} LTC** (~${(amount*USD_PER_POINT):.2f})!'))
     if LOG_CHANNEL_ID and (ch:=bot.get_channel(LOG_CHANNEL_ID)): await ch.send(embed=emb('Withdrawal payout required',f'ID: `{req["id"]}`\nUser: {ctx.author.mention}\nAddress: `{address}`\nAmount: {money(amount)} points'))
 
 # ... remainder of file unchanged ...
