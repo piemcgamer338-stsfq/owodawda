@@ -169,8 +169,6 @@ async def guide(ctx): await ctx.send(embed=emb('LiteBet Guide','Start with `.dai
 @bot.command(aliases=['games'])
 async def game_list(ctx): await ctx.send(embed=emb('🎮 LiteBet Games','🃏 `.blackjack/.bj` — House Blackjack\n🎲 `.ward` — Highest roll wins\n🃏 `.hilo` — Predict the next card\n🪙 `.coinflip/.cf` — 1.92× payout\n🚀 `.limbo` — Set your multiplier\n💣 `.mines` — Reveal diamonds\n#️⃣ `.ttt` — Tic-tac-toe\n✂️ `.rps` — Rock, paper, scissors\n✍️ `.word` — Word challenge'))
 
-# Balance Command
-
 @bot.command(aliases=['b', 'bal'])
 async def balance(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -185,6 +183,18 @@ async def balance(ctx, member: discord.Member = None):
             )
         )
 
+    # Get points balance
+    points = Decimal(str(u['balance']))
+
+    # Convert points
+    ltc = (points * Decimal('0.0001')).quantize(
+        Decimal('0.0000')
+    )
+
+    usd = (points * Decimal('0.005')).quantize(
+        Decimal('0.0000')
+    )
+
     # Generate balance card
     p = balance_card(
         member.display_name,
@@ -192,18 +202,24 @@ async def balance(ctx, member: discord.Member = None):
         u['balance']
     )
 
-    # Attach image to the embed
+    # Attach image to embed
     file = discord.File(
         p,
         filename='balance.png'
     )
 
-    embed = emb(
-        'Balance',
-        f"**{member.display_name}**'s balance card"
+    # Create embed
+    embed = discord.Embed(
+        title=f"{member.display_name}'s balance card",
+        description=(
+            f"**{ltc:.4f} LTC** | "
+            f"**${usd:.4f} USD** | "
+            f"**{points:.0f} Points**"
+        ),
+        color=0x5865F2
     )
 
-    # Put the attached image INSIDE the embed
+    # Put balance image inside embed
     embed.set_image(
         url='attachment://balance.png'
     )
@@ -212,7 +228,7 @@ async def balance(ctx, member: discord.Member = None):
         embed=embed,
         file=file
     )
-
+    
 @bot.command()
 async def daily(ctx):
     u=await db.user(ctx.author.id); now=datetime.now(timezone.utc)
