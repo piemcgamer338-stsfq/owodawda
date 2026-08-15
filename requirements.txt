@@ -4,3 +4,4 @@ Pillow>=10.0
 python-dotenv>=1.0
 aiohttp>=3.9
 bip-utils>=2.9
+english-words
