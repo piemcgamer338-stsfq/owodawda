@@ -171,6 +171,144 @@ async def balance(ctx, member: discord.Member=None):
     member=member or ctx.author; u=await db.user(member.id)
     if member != ctx.author and u['privacy']: return await ctx.send(embed=emb('Private account','That member has chosen to keep their profile private.',RED))
     p=balance_card(member.display_name,member.id,u['balance']); await ctx.send(file=discord.File(p),embed=emb('Balance',f'**{member.display_name}**\'s balance card'))
+
+@bot.group(invoke_without_command=True)
+async def thread(ctx):
+    """Show thread command help."""
+    await ctx.send(
+        embed=emb(
+            'Thread Commands',
+            '**`.thread create`** — Create your own private thread\n'
+            '**`.thread delete`** — Delete the current thread\n'
+            '**`.thread add @user`** — Add a user to the current thread\n'
+            '**`.thread remove @user`** — Remove a user from the current thread'
+        )
+    )
+
+
+@thread.command(name='create')
+async def thread_create(ctx):
+    """Create a private thread named username-thread."""
+    
+    # Create the thread from the command message
+    thread_name = f'{ctx.author.name}-thread'
+
+    created_thread = await ctx.message.create_thread(
+        name=thread_name,
+        auto_archive_duration=1440
+    )
+
+    await created_thread.add_user(ctx.author)
+
+    await created_thread.send(
+        embed=emb(
+            'Thread Created',
+            f'{ctx.author.mention}, your private thread has been created.\n\n'
+            f'Use `.thread` to see all available thread commands.',
+            GREEN
+        )
+    )
+
+    await ctx.send(
+        embed=emb(
+            'Thread Created',
+            f'Your thread has been created: {created_thread.mention}',
+            GREEN
+        )
+    )
+
+
+@thread.command(name='delete')
+async def thread_delete(ctx):
+    """Delete the current thread."""
+
+    if not isinstance(ctx.channel, discord.Thread):
+        return await ctx.send(
+            embed=emb(
+                'Thread Command Error',
+                'You can only use `.thread delete` inside a thread.',
+                RED
+            )
+        )
+
+    await ctx.send(
+        embed=emb(
+            'Thread Deleted',
+            'This thread will now be deleted.',
+            RED
+        )
+    )
+
+    await asyncio.sleep(2)
+    await ctx.channel.delete()
+
+
+@thread.command(name='add')
+async def thread_add(ctx, member: discord.Member):
+    """Add a user to the current thread."""
+
+    if not isinstance(ctx.channel, discord.Thread):
+        return await ctx.send(
+            embed=emb(
+                'Thread Command Error',
+                'You can only use `.thread add @user` inside a thread.',
+                RED
+            )
+        )
+
+    try:
+        await ctx.channel.add_user(member)
+
+        await ctx.send(
+            embed=emb(
+                'User Added',
+                f'{member.mention} has been added to this thread.',
+                GREEN
+            )
+        )
+
+    except discord.HTTPException:
+        await ctx.send(
+            embed=emb(
+                'Error',
+                f'Could not add {member.mention} to this thread.',
+                RED
+            )
+        )
+
+
+@thread.command(name='remove')
+async def thread_remove(ctx, member: discord.Member):
+    """Remove a user from the current thread."""
+
+    if not isinstance(ctx.channel, discord.Thread):
+        return await ctx.send(
+            embed=emb(
+                'Thread Command Error',
+                'You can only use `.thread remove @user` inside a thread.',
+                RED
+            )
+        )
+
+    try:
+        await ctx.channel.remove_user(member)
+
+        await ctx.send(
+            embed=emb(
+                'User Removed',
+                f'{member.mention} has been removed from this thread.',
+                GREEN
+            )
+        )
+
+    except discord.HTTPException:
+        await ctx.send(
+            embed=emb(
+                'Error',
+                f'Could not remove {member.mention} from this thread.',
+                RED
+            )
+        )
 @bot.command()
 async def daily(ctx):
     u=await db.user(ctx.author.id); now=datetime.now(timezone.utc)
