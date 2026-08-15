@@ -169,11 +169,50 @@ async def guide(ctx): await ctx.send(embed=emb('LiteBet Guide','Start with `.dai
 @bot.command(aliases=['games'])
 async def game_list(ctx): await ctx.send(embed=emb('🎮 LiteBet Games','🃏 `.blackjack/.bj` — House Blackjack\n🎲 `.ward` — Highest roll wins\n🃏 `.hilo` — Predict the next card\n🪙 `.coinflip/.cf` — 1.92× payout\n🚀 `.limbo` — Set your multiplier\n💣 `.mines` — Reveal diamonds\n#️⃣ `.ttt` — Tic-tac-toe\n✂️ `.rps` — Rock, paper, scissors\n✍️ `.word` — Word challenge'))
 
-@bot.command(aliases=['b','bal'])
-async def balance(ctx, member: discord.Member=None):
-    member=member or ctx.author; u=await db.user(member.id)
-    if member != ctx.author and u['privacy']: return await ctx.send(embed=emb('Private account','That member has chosen to keep their profile private.',RED))
-    p=balance_card(member.display_name,member.id,u['balance']); await ctx.send(file=discord.File(p),embed=emb('Balance',f'**{member.display_name}**\'s balance card'))
+# Balance Command
+
+@bot.command(aliases=['b', 'bal'])
+async def balance(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    u = await db.user(member.id)
+
+    if member != ctx.author and u['privacy']:
+        return await ctx.send(
+            embed=emb(
+                'Private account',
+                'That member has chosen to keep their profile private.',
+                RED
+            )
+        )
+
+    # Generate balance card
+    p = balance_card(
+        member.display_name,
+        member.id,
+        u['balance']
+    )
+
+    # Attach image to the embed
+    file = discord.File(
+        p,
+        filename='balance.png'
+    )
+
+    embed = emb(
+        'Balance',
+        f"**{member.display_name}**'s balance card"
+    )
+
+    # Put the attached image INSIDE the embed
+    embed.set_image(
+        url='attachment://balance.png'
+    )
+
+    await ctx.send(
+        embed=embed,
+        file=file
+    )
+
 @bot.command()
 async def daily(ctx):
     u=await db.user(ctx.author.id); now=datetime.now(timezone.utc)
