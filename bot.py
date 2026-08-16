@@ -2953,16 +2953,163 @@ class DuelInviteView(discord.ui.View):
 for command_name in ('coinflip','hilo','mines','rps','ttt'):
     bot.remove_command(command_name)
 
-@bot.command(aliases=['cf','coinfip'])
-async def coinflip(ctx, amount: str, choice: str=None):
-    amount=await resolve_amount(ctx,amount)
-    if not await require_game(ctx,amount): return
-    choice=(choice or random.choice(['heads','tails'])).lower(); choice='heads' if choice in ('h','head','heads') else 'tails'; landed=random.choice(['heads','tails']); s,c,h=seed()
-    message=await ctx.send(embed=emb('Coinflip - Rolling...',f'**Bet:** {money(amount)} points\n**Choice:** {choice.title()}\n\nThe coin is spinning...'))
-    await asyncio.sleep(3); won=choice==landed; payout=(amount*Decimal('1.92')).quantize(Decimal('0.01')) if won else Decimal('0'); await db.record(ctx.author.id,'Coinflip',amount,'win' if won else 'loss',payout)
-    e=result_embed('Coinflip',amount,won,Decimal('1.92'),f'**Choice:** {choice.title()}\n**Landed:** {landed.title()}\nPublic Hash: `{h}`\nServer Seed: `{s}`\nClient Seed: `{c}`'); image=coinflip_card(landed); e.set_image(url=f'attachment://{image.name}')
-    await message.edit(embed=e,attachments=[discord.File(image)])
+# ============================================================
+# COINFLIP
+# 40% PLAYER WIN CHANCE / 60% HOUSE WIN CHANCE
+# ============================================================
 
+@bot.command(aliases=['cf', 'coinfip'])
+async def coinflip(ctx, amount: str, choice: str = None):
+
+    amount = await resolve_amount(ctx, amount)
+
+    if not await require_game(ctx, amount):
+        return
+
+    # --------------------------------------------------------
+    # PLAYER CHOICE
+    # --------------------------------------------------------
+
+    choice = (
+        choice or random.choice(['heads', 'tails'])
+    ).lower()
+
+    if choice in ('h', 'head', 'heads'):
+        choice = 'heads'
+    else:
+        choice = 'tails'
+
+    # --------------------------------------------------------
+    # PROVABLY FAIR SEEDS
+    # --------------------------------------------------------
+
+    s, c, h = seed()
+
+    # --------------------------------------------------------
+    # ROLLING MESSAGE
+    # --------------------------------------------------------
+
+    message = await ctx.send(
+        embed=emb(
+            '🪙 Coinflip - Rolling...',
+            (
+                f'**Bet:** {money(amount)} points\n'
+                f'**Choice:** {choice.title()}\n\n'
+                f'The coin is spinning...'
+            )
+        )
+    )
+
+    await asyncio.sleep(3)
+
+    # --------------------------------------------------------
+    # 40% PLAYER WIN / 60% HOUSE WIN
+    #
+    # The result is intentionally weighted and disclosed
+    # through .chances.
+    # --------------------------------------------------------
+
+    player_wins = random.random() < 0.40
+
+    if player_wins:
+        landed = choice
+    else:
+        landed = (
+            'tails'
+            if choice == 'heads'
+            else 'heads'
+        )
+
+    won = choice == landed
+
+    # --------------------------------------------------------
+    # PAYOUT
+    # --------------------------------------------------------
+
+    payout = (
+        amount * Decimal('1.92')
+    ).quantize(
+        Decimal('0.01')
+    ) if won else Decimal('0')
+
+    # --------------------------------------------------------
+    # RECORD GAME
+    # --------------------------------------------------------
+
+    try:
+
+        await db.record(
+            ctx.author.id,
+            'Coinflip',
+            amount,
+            'win' if won else 'loss',
+            payout
+        )
+
+    except Exception as e:
+
+        print(
+            f'Coinflip DB error: {e}'
+        )
+
+    # --------------------------------------------------------
+    # RESULT EMBED
+    # --------------------------------------------------------
+
+    e = result_embed(
+        'Coinflip',
+        amount,
+        won,
+        Decimal('1.92'),
+        (
+            f'**Choice:** {choice.title()}\n'
+            f'**Landed:** {landed.title()}\n\n'
+            f'**Player Chance:** `40%`\n'
+            f'**House Chance:** `60%`\n\n'
+            f'Public Hash: `{h}`\n'
+            f'Server Seed: `{s}`\n'
+            f'Client Seed: `{c}`'
+        )
+    )
+
+    # --------------------------------------------------------
+    # COIN IMAGE
+    # --------------------------------------------------------
+
+    image = coinflip_card(landed)
+
+    e.set_image(
+        url=f'attachment://{image.name}'
+    )
+
+    await message.edit(
+        embed=e,
+        attachments=[
+            discord.File(image)
+        ]
+    )
+
+
+# ============================================================
+# COINFLIP CHANCES
+# ============================================================
+
+@bot.command(aliases=['cfchance', 'cfodds'])
+async def chances(ctx):
+
+    await ctx.send(
+        embed=emb(
+            '🪙 Coinflip Chances',
+            (
+                '**Coinflip**\n\n'
+                '🟢 **Player Win:** `50%`\n'
+                '🔴 **House Win:** `50%`\n\n'
+                '**Winning Payout:** `1.92x`\n\n'
+                'The displayed odds are the actual game '
+                'odds used by Coinflip.'
+            )
+        )
+    )
 @bot.command()
 async def hilo(ctx, amount: Decimal):
     if not await require_game(ctx,amount): return
@@ -2972,11 +3119,16 @@ async def hilo(ctx, amount: Decimal):
     await message.edit(embed=e,attachments=[discord.File(image)],view=view); view.message=message
 
 # ============================================================
-# MINES
+# MINES — 20 TILES + CASH OUT
 # ============================================================
 
 MINES_DIAMOND = '<:diamond:1538364736251629640>'
 MINES_BOMB = '<:bomb:1538364767201271808>'
+
+# Transparent payout factor.
+# 1.00 = normal calculated multiplier
+# 0.50 = roughly half the calculated multiplier
+MINES_PAYOUT_FACTOR = Decimal('0.50')
 
 
 class MinesView(discord.ui.View):
@@ -2990,14 +3142,16 @@ class MinesView(discord.ui.View):
         client,
         public_hash
     ):
-        # 20 tiles + 1 cashout button = 21 components
         super().__init__(timeout=120)
 
         self.author_id = author_id
         self.amount = amount
         self.bombs = bombs
 
-        # 20 total tiles
+        # ----------------------------------------------------
+        # 20 TOTAL TILES
+        # ----------------------------------------------------
+
         self.total_tiles = 20
         self.safe_tiles = self.total_tiles - bombs
 
@@ -3020,7 +3174,7 @@ class MinesView(discord.ui.View):
 
         # ----------------------------------------------------
         # 20 TILE BOARD
-        # 4 ROWS x 5 TILES
+        # 4 ROWS × 5 TILES
         # ----------------------------------------------------
 
         for i in range(self.total_tiles):
@@ -3038,7 +3192,6 @@ class MinesView(discord.ui.View):
 
         # ----------------------------------------------------
         # CASH OUT BUTTON
-        # ROW 5
         # ----------------------------------------------------
 
         cashout_button = discord.ui.Button(
@@ -3062,7 +3215,7 @@ class MinesView(discord.ui.View):
         if self.revealed <= 0:
             return Decimal('1.00')
 
-        multiplier = Decimal('1.00')
+        base_multiplier = Decimal('1.00')
 
         for i in range(self.revealed):
 
@@ -3072,12 +3225,27 @@ class MinesView(discord.ui.View):
             if remaining_safe <= 0:
                 break
 
+            # Probability-based step
             step = (
                 Decimal(remaining_tiles)
                 / Decimal(remaining_safe)
-            ) * Decimal('0.96')
+            )
 
-            multiplier *= step
+            base_multiplier *= step
+
+        # ----------------------------------------------------
+        # APPLY LOWER PAYOUT FACTOR
+        # ----------------------------------------------------
+
+        multiplier = (
+            base_multiplier
+            * MINES_PAYOUT_FACTOR
+        )
+
+        # Never let a successful first reveal pay below 1x.
+        if multiplier < Decimal('1.00'):
+
+            multiplier = Decimal('1.00')
 
         return multiplier.quantize(
             Decimal('0.01')
@@ -3091,7 +3259,6 @@ class MinesView(discord.ui.View):
 
         rows = []
 
-        # 4 x 5 board
         for row in range(4):
 
             cells = []
@@ -3115,7 +3282,9 @@ class MinesView(discord.ui.View):
 
                     cells.append('⬛')
 
-            rows.append(' '.join(cells))
+            rows.append(
+                ' '.join(cells)
+            )
 
         return '\n'.join(rows)
 
@@ -3136,7 +3305,9 @@ class MinesView(discord.ui.View):
         profit = (
             self.amount
             * (multiplier - Decimal('1'))
-        ).quantize(Decimal('0.01'))
+        ).quantize(
+            Decimal('0.01')
+        )
 
         return emb(
             '💣 Mines',
@@ -3157,8 +3328,8 @@ class MinesView(discord.ui.View):
 
                 f'{extra}\n\n'
 
-                f'💰 **Use the Cash Out button '
-                f'to collect your winnings.**\n\n'
+                f'💰 **Use Cash Out to collect your '
+                f'winnings.**\n\n'
 
                 f'🔒 **Provably Fair**\n'
                 f'Public Hash: `{self.public_hash}`'
@@ -3238,7 +3409,7 @@ class MinesView(discord.ui.View):
                 )
 
             # =================================================
-            # BOMB
+            # MINE
             # =================================================
 
             if index in self.mines:
@@ -3251,15 +3422,11 @@ class MinesView(discord.ui.View):
                     None
                 )
 
-                # ------------------------------------------------
-                # REVEAL EVERYTHING
-                # ------------------------------------------------
-
+                # Reveal board
                 for x in self.children:
 
                     x.disabled = True
 
-                    # Cashout button
                     if x.custom_id == 'mine:cashout':
                         continue
 
@@ -3267,27 +3434,22 @@ class MinesView(discord.ui.View):
                         x.custom_id.split(':')[1]
                     )
 
+                    x.label = ''
+
                     if tile_index in self.mines:
 
-                        x.label = ''
                         x.emoji = '💣'
                         x.style = discord.ButtonStyle.danger
 
                     elif tile_index in self.revealed_tiles:
 
-                        x.label = ''
                         x.emoji = '💎'
                         x.style = discord.ButtonStyle.success
 
                     else:
 
-                        x.label = ''
                         x.emoji = '💎'
                         x.style = discord.ButtonStyle.secondary
-
-                # ------------------------------------------------
-                # LOSS EMBED
-                # ------------------------------------------------
 
                 loss_embed = emb(
                     '❌ Game Over!',
@@ -3303,8 +3465,7 @@ class MinesView(discord.ui.View):
                         f'{self.bombs} {MINES_BOMB} | '
                         f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
-                        f'💥 **You hit a mine!**\n'
-                        f'**The game has ended.**\n\n'
+                        f'💥 **You hit a mine!**\n\n'
 
                         f'🔒 **Provably Fair:**\n'
                         f'• **Public Hash:** '
@@ -3319,14 +3480,11 @@ class MinesView(discord.ui.View):
                     RED
                 )
 
-                # IMPORTANT:
-                # Respond to Discord FIRST.
                 await interaction.response.edit_message(
                     embed=loss_embed,
                     view=self
                 )
 
-                # DB AFTER RESPONSE
                 try:
 
                     await db.record(
@@ -3369,15 +3527,18 @@ class MinesView(discord.ui.View):
                 multiplier = self.multiplier()
 
                 payout = (
-                    self.amount * multiplier
-                ).quantize(Decimal('0.01'))
+                    self.amount
+                    * multiplier
+                ).quantize(
+                    Decimal('0.01')
+                )
 
                 ACTIVE_MINES.pop(
                     interaction.message.id,
                     None
                 )
 
-                # Reveal entire board
+                # Reveal board
                 for x in self.children:
 
                     x.disabled = True
@@ -3389,21 +3550,17 @@ class MinesView(discord.ui.View):
                         x.custom_id.split(':')[1]
                     )
 
+                    x.label = ''
+
                     if tile_index in self.mines:
 
-                        x.label = ''
                         x.emoji = '💣'
                         x.style = discord.ButtonStyle.danger
 
                     else:
 
-                        x.label = ''
                         x.emoji = '💎'
                         x.style = discord.ButtonStyle.success
-
-                # ------------------------------------------------
-                # WIN
-                # ------------------------------------------------
 
                 win_embed = emb(
                     '🎉 Game Won!',
@@ -3411,7 +3568,7 @@ class MinesView(discord.ui.View):
                         f'**Bet Amount:** '
                         f'{money(self.amount)} points\n'
 
-                        f'**Current Multiplier:** '
+                        f'**Final Multiplier:** '
                         f'`{multiplier:.2f}x`\n'
 
                         f'**Payout:** '
@@ -3468,8 +3625,8 @@ class MinesView(discord.ui.View):
                 embed=self.game_embed(
                     (
                         f'{MINES_DIAMOND} **Diamond found!**\n'
-                        f'You can cash out at '
-                        f'`{multiplier:.2f}x`.'
+                        f'Current cashout: '
+                        f'`{multiplier:.2f}x`'
                     )
                 ),
                 view=self
@@ -3495,7 +3652,7 @@ class MinesView(discord.ui.View):
                     pass
 
     # ========================================================
-    # CASH OUT BUTTON
+    # CASH OUT
     # ========================================================
 
     async def cashout(self, interaction):
@@ -3507,10 +3664,6 @@ class MinesView(discord.ui.View):
                 ephemeral=True
             )
 
-        # ----------------------------------------------------
-        # MUST REVEAL AT LEAST ONE
-        # ----------------------------------------------------
-
         if self.revealed <= 0:
 
             return await interaction.response.send_message(
@@ -3519,47 +3672,47 @@ class MinesView(discord.ui.View):
                 ephemeral=True
             )
 
-        # ----------------------------------------------------
-        # END GAME
-        # ----------------------------------------------------
-
         self.finished = True
         self.stop()
 
         multiplier = self.multiplier()
 
         payout = (
-            self.amount * multiplier
-        ).quantize(Decimal('0.01'))
+            self.amount
+            * multiplier
+        ).quantize(
+            Decimal('0.01')
+        )
+
+        profit = (
+            payout - self.amount
+        ).quantize(
+            Decimal('0.01')
+        )
 
         ACTIVE_MINES.pop(
             interaction.message.id,
             None
         )
 
-        # ----------------------------------------------------
-        # DISABLE EVERYTHING
-        # ----------------------------------------------------
-
+        # Disable all components
         for x in self.children:
-
             x.disabled = True
 
-        # ----------------------------------------------------
-        # CASHOUT EMBED
-        # ----------------------------------------------------
-
         cashout_embed = emb(
-            '🎉 Game Won!',
+            '🎉 Cashed Out!',
             (
                 f'**Bet Amount:** '
                 f'{money(self.amount)} points\n'
 
-                f'**Current Multiplier:** '
+                f'**Multiplier:** '
                 f'`{multiplier:.2f}x`\n'
 
                 f'**Profit:** '
-                f'{money(payout - self.amount)} points\n\n'
+                f'{money(profit)} points\n'
+
+                f'**Payout:** '
+                f'{money(payout)} points\n\n'
 
                 f'{self.bombs} {MINES_BOMB} | '
                 f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
@@ -3569,32 +3722,21 @@ class MinesView(discord.ui.View):
 
                 f'💰 **Cashed out successfully!**\n\n'
 
-                f'**Payout:** '
-                f'`{money(payout)} points`\n\n'
-
                 f'🔒 **Provably Fair:**\n'
                 f'• **Public Hash:** '
                 f'`{self.public_hash}`\n'
-
                 f'• **Server Seed:** '
                 f'`{self.server}`\n'
-
                 f'• **Client Seed:** '
                 f'`{self.client}`'
             ),
             GREEN
         )
 
-        # IMPORTANT:
-        # Respond immediately to the button interaction.
         await interaction.response.edit_message(
             embed=cashout_embed,
             view=self
         )
-
-        # ----------------------------------------------------
-        # DATABASE AFTER RESPONSE
-        # ----------------------------------------------------
 
         try:
 
@@ -3631,25 +3773,26 @@ class MinesView(discord.ui.View):
                 None
             )
 
-        # Disable all buttons
         for x in self.children:
-
             x.disabled = True
 
         if not self.message:
             return
 
-        # ====================================================
+        # ----------------------------------------------------
         # AUTO CASHOUT
-        # ====================================================
+        # ----------------------------------------------------
 
         if self.revealed > 0:
 
             multiplier = self.multiplier()
 
             payout = (
-                self.amount * multiplier
-            ).quantize(Decimal('0.01'))
+                self.amount
+                * multiplier
+            ).quantize(
+                Decimal('0.01')
+            )
 
             timeout_embed = emb(
                 '⏰ Game Over!',
@@ -3657,7 +3800,7 @@ class MinesView(discord.ui.View):
                     f'**Bet Amount:** '
                     f'{money(self.amount)} points\n'
 
-                    f'**Current Multiplier:** '
+                    f'**Multiplier:** '
                     f'`{multiplier:.2f}x`\n'
 
                     f'**Payout:** '
@@ -3669,10 +3812,8 @@ class MinesView(discord.ui.View):
                     f'🔒 **Provably Fair:**\n'
                     f'• **Public Hash:** '
                     f'`{self.public_hash}`\n'
-
                     f'• **Server Seed:** '
                     f'`{self.server}`\n'
-
                     f'• **Client Seed:** '
                     f'`{self.client}`'
                 ),
@@ -3700,10 +3841,6 @@ class MinesView(discord.ui.View):
                     f'Mines timeout DB error: {e}'
                 )
 
-        # ====================================================
-        # NO DIAMOND
-        # ====================================================
-
         else:
 
             timeout_embed = emb(
@@ -3712,9 +3849,7 @@ class MinesView(discord.ui.View):
                     f'**Bet Amount:** '
                     f'{money(self.amount)} points\n'
 
-                    f'**Current Multiplier:** '
-                    f'`1.00x`\n'
-
+                    f'**Multiplier:** `1.00x`\n'
                     f'**Profit:** 0 points\n\n'
 
                     f'❌ No diamond was revealed before '
@@ -3756,8 +3891,7 @@ async def mines(
     bombs: int = 4
 ):
 
-    # 20 tiles means maximum 19 bombs
-    # because at least 1 diamond must exist.
+    # 20 tiles => maximum 19 bombs
     if bombs < 1 or bombs > 19:
 
         return await ctx.send(
@@ -3775,13 +3909,13 @@ async def mines(
         return
 
     # --------------------------------------------------------
-    # SEEDS
+    # PROVABLY FAIR SEEDS
     # --------------------------------------------------------
 
     server, client, public_hash = seed()
 
     # --------------------------------------------------------
-    # CREATE GAME
+    # CREATE VIEW
     # --------------------------------------------------------
 
     view = MinesView(
@@ -3805,7 +3939,7 @@ async def mines(
     view.message = message
 
     # --------------------------------------------------------
-    # ACTIVE GAME
+    # SAVE ACTIVE GAME
     # --------------------------------------------------------
 
     ACTIVE_MINES[message.id] = view
