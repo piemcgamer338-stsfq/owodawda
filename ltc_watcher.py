@@ -13,7 +13,7 @@ CHECK_INTERVAL = int(
 )
 
 REQUIRED_CONFIRMATIONS = int(
-    os.getenv("LTC_CONFIRMATIONS", "6")
+    os.getenv("LTC_CONFIRMATIONS", "1")
 )
 
 BASE_URL = "https://litecoinspace.org/api"
