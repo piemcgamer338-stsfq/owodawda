@@ -691,6 +691,150 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
         detail,
         limbo_card(float(crashed))
     )
+
+# ============================================================
+# DEPOSIT SYSTEM
+# ============================================================
+
+@bot.command(aliases=['depo'])
+async def deposit(ctx):
+    xpub = os.getenv('LTC_XPUB')
+
+    if not xpub:
+        return await ctx.send(
+            embed=emb(
+                'Deposit unavailable',
+                'The owner has not configured `LTC_XPUB` yet.',
+                RED
+            )
+        )
+
+    try:
+        # Get / create user
+        u = await db.user(ctx.author.id)
+
+        # ----------------------------------------------------
+        # REUSE EXISTING DEPOSIT ADDRESS
+        # ----------------------------------------------------
+
+        existing_address = u.get('deposit_address')
+
+        if existing_address:
+            address = existing_address
+
+        else:
+            # ------------------------------------------------
+            # GET NEXT DEPOSIT INDEX
+            # ------------------------------------------------
+
+            index = int(u['deposit_index'])
+
+            # ------------------------------------------------
+            # DERIVE LTC ADDRESS FROM XPUB
+            # ------------------------------------------------
+
+            wallet = Bip44.FromExtendedKey(
+                xpub.strip(),
+                Bip44Coins.LITECOIN
+            )
+
+            address = (
+                wallet
+                .Change(Bip44Changes.CHAIN_EXT)
+                .AddressIndex(index)
+                .PublicKey()
+                .ToAddress()
+            )
+
+            # ------------------------------------------------
+            # SAVE ADDRESS + MOVE INDEX
+            # ------------------------------------------------
+
+            await db.pool.execute(
+                """
+                UPDATE users
+                SET
+                    deposit_index = deposit_index + 1,
+                    deposit_address = $2
+                WHERE user_id = $1
+                """,
+                ctx.author.id,
+                address
+            )
+
+        # ====================================================
+        # DEPOSIT EMBED
+        # ====================================================
+
+        deposit_embed = discord.Embed(
+            title='💰 Your Litecoin Deposit Address',
+            description=(
+                f'**Send Litecoin (LTC) to the address below.**\n\n'
+                f'`{address}`\n\n'
+                f'**Network:** Litecoin Mainnet\n'
+                f'**Currency:** LTC\n\n'
+                f'Your deposit will be credited after the required '
+                f'confirmations.'
+            ),
+            color=GREEN,
+            timestamp=datetime.now(timezone.utc)
+        )
+
+        deposit_embed.set_footer(
+            text='LiteBet • Litecoin Deposits'
+        )
+
+        # ====================================================
+        # SEND ADDRESS IN DM
+        # ====================================================
+
+        try:
+
+            await ctx.author.send(
+                embed=deposit_embed
+            )
+
+            await ctx.send(
+                embed=emb(
+                    'Deposit Address Sent',
+                    'Your **Litecoin (LTC)** deposit address has been sent to your DMs.',
+                    GREEN
+                )
+            )
+
+        except discord.Forbidden:
+
+            # ------------------------------------------------
+            # DMs CLOSED
+            # ------------------------------------------------
+
+            await ctx.send(
+                embed=emb(
+                    'Unable to DM You',
+                    (
+                        'I could not send your deposit address '
+                        'because your DMs are closed.\n\n'
+                        f'**Your Litecoin Address:**\n'
+                        f'`{address}`'
+                    ),
+                    RED
+                )
+            )
+
+    except Exception as e:
+
+        print(
+            f'Deposit error for {ctx.author.id}: {e}'
+        )
+
+        await ctx.send(
+            embed=emb(
+                'Deposit Error',
+                'I could not generate your Litecoin deposit address. Please try again.',
+                RED
+            )
+        )
+        
     
 @bot.command(aliases=['bj'])
 async def blackjack(ctx, amount: Decimal):
