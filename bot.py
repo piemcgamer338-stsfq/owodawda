@@ -5820,7 +5820,17 @@ async def on_command_error(ctx,error):
     raise error
 
 async def main():
-    if not TOKEN or not DB_URL: raise RuntimeError('Set DISCORD_TOKEN and DATABASE_URL in Railway Variables.')
+    if not TOKEN or not DB_URL:
+        raise RuntimeError('Set DISCORD_TOKEN and DATABASE_URL in Railway Variables.')
+
     await db.connect()
-    async with bot: await bot.start(TOKEN)
-if __name__=='__main__': asyncio.run(main())
+
+    # Start Litecoin deposit watcher
+    asyncio.create_task(ltc_watcher(db))
+
+    async with bot:
+        await bot.start(TOKEN)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
