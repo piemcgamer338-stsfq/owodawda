@@ -304,6 +304,595 @@ async def on_ready():
 async def reset_wagers():
     async with db.pool.acquire() as c: await c.execute('UPDATE users SET daily_wager=0')
 
+    # `.race` Wager Race Command
+
+=
+# ============================================================
+# WAGER RACE
+# ============================================================
+
+import io
+import aiohttp
+from PIL import Image, ImageDraw, ImageFont
+
+
+# ============================================================
+# RACE SETTINGS
+# ============================================================
+
+RACE_TITLE = "LiteBet WAGER RACE"
+RACE_SUBTITLE = "$24 RACE  -  LiteBet CASINO"
+
+# Prize for each position
+RACE_PRIZES = {
+    1: "$5",
+    2: "$5",
+    3: "$5",
+    4: "$1",
+    5: "$1",
+    6: "$1",
+    7: "$1",
+    8: "$1",
+    9: "$1",
+    10: "$1"
+}
+
+
+# ============================================================
+# FONT HELPER
+# ============================================================
+
+def race_font(size, bold=False):
+
+    possible_fonts = []
+
+    if bold:
+        possible_fonts = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            "arialbd.ttf"
+        ]
+    else:
+        possible_fonts = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+            "arial.ttf"
+        ]
+
+    for path in possible_fonts:
+
+        try:
+            return ImageFont.truetype(
+                path,
+                size
+            )
+        except Exception:
+            continue
+
+    return ImageFont.load_default()
+
+
+# ============================================================
+# GET DISCORD AVATAR
+# ============================================================
+
+async def get_race_avatar(user):
+
+    try:
+
+        avatar_url = user.display_avatar.replace(
+            size=128,
+            format="png"
+        ).url
+
+        async with aiohttp.ClientSession() as session:
+
+            async with session.get(
+                avatar_url
+            ) as response:
+
+                if response.status != 200:
+                    return None
+
+                data = await response.read()
+
+        avatar = Image.open(
+            io.BytesIO(data)
+        ).convert("RGBA")
+
+        avatar = avatar.resize(
+            (42, 42),
+            Image.Resampling.LANCZOS
+        )
+
+        # Circular avatar mask
+        mask = Image.new(
+            "L",
+            (42, 42),
+            0
+        )
+
+        mask_draw = ImageDraw.Draw(mask)
+
+        mask_draw.ellipse(
+            (0, 0, 42, 42),
+            fill=255
+        )
+
+        avatar.putalpha(mask)
+
+        return avatar
+
+    except Exception as e:
+
+        print(
+            f"Race avatar error: {e}"
+        )
+
+        return None
+
+
+# ============================================================
+# CREATE RACE IMAGE
+# ============================================================
+
+async def create_race_image(ctx, players):
+
+    width = 900
+    height = 850
+
+    image = Image.new(
+        "RGB",
+        (width, height),
+        (7, 10, 25)
+    )
+
+    draw = ImageDraw.Draw(image)
+
+    # --------------------------------------------------------
+    # FONTS
+    # --------------------------------------------------------
+
+    title_font = race_font(
+        42,
+        bold=True
+    )
+
+    subtitle_font = race_font(
+        20,
+        bold=True
+    )
+
+    rank_font = race_font(
+        25,
+        bold=True
+    )
+
+    name_font = race_font(
+        17,
+        bold=True
+    )
+
+    points_font = race_font(
+        15
+    )
+
+    prize_font = race_font(
+        18,
+        bold=True
+    )
+
+    small_font = race_font(
+        13
+    )
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    draw.text(
+        (width // 2, 35),
+        RACE_TITLE,
+        fill=(255, 220, 0),
+        font=title_font,
+        anchor="ma"
+    )
+
+    draw.text(
+        (width // 2, 82),
+        RACE_SUBTITLE,
+        fill=(180, 185, 200),
+        font=subtitle_font,
+        anchor="ma"
+    )
+
+    # --------------------------------------------------------
+    # TOP LINE
+    # --------------------------------------------------------
+
+    draw.line(
+        (180, 115, 720, 115),
+        fill=(45, 50, 75),
+        width=2
+    )
+
+    # --------------------------------------------------------
+    # RACE ROWS
+    # --------------------------------------------------------
+
+    start_y = 135
+    row_height = 63
+    row_width = 820
+    row_x = 40
+
+    for position, player in enumerate(
+        players[:10],
+        start=1
+    ):
+
+        y = (
+            start_y
+            + (position - 1) * row_height
+        )
+
+        # ----------------------------------------------------
+        # ROW BACKGROUND
+        # ----------------------------------------------------
+
+        if position == 1:
+
+            row_color = (40, 38, 5)
+            border_color = (255, 220, 0)
+
+        elif position == 2:
+
+            row_color = (35, 35, 38)
+            border_color = (150, 150, 155)
+
+        elif position == 3:
+
+            row_color = (45, 28, 10)
+            border_color = (180, 105, 35)
+
+        else:
+
+            row_color = (17, 21, 36)
+            border_color = (27, 32, 50)
+
+        draw.rounded_rectangle(
+            (
+                row_x,
+                y,
+                row_x + row_width,
+                y + 54
+            ),
+            radius=8,
+            fill=row_color,
+            outline=border_color,
+            width=2 if position <= 3 else 1
+        )
+
+        # ----------------------------------------------------
+        # RANK
+        # ----------------------------------------------------
+
+        if position == 1:
+            rank_color = (255, 225, 0)
+
+        elif position == 2:
+            rank_color = (190, 190, 195)
+
+        elif position == 3:
+            rank_color = (220, 130, 45)
+
+        else:
+            rank_color = (145, 155, 180)
+
+        draw.text(
+            (
+                row_x + 25,
+                y + 27
+            ),
+            f"#{position}",
+            fill=rank_color,
+            font=rank_font,
+            anchor="lm"
+        )
+
+        # ----------------------------------------------------
+        # AVATAR
+        # ----------------------------------------------------
+
+        user = player["user"]
+
+        avatar = await get_race_avatar(
+            user
+        )
+
+        avatar_x = row_x + 75
+        avatar_y = y + 6
+
+        if avatar:
+
+            image.paste(
+                avatar,
+                (
+                    avatar_x,
+                    avatar_y
+                ),
+                avatar
+            )
+
+        else:
+
+            draw.ellipse(
+                (
+                    avatar_x,
+                    avatar_y,
+                    avatar_x + 42,
+                    avatar_y + 42
+                ),
+                fill=(45, 50, 65)
+            )
+
+        # ----------------------------------------------------
+        # USERNAME
+        # ----------------------------------------------------
+
+        username = user.display_name
+
+        if len(username) > 18:
+
+            username = (
+                username[:18]
+                + "..."
+            )
+
+        draw.text(
+            (
+                row_x + 135,
+                y + 18
+            ),
+            username,
+            fill=(235, 235, 240),
+            font=name_font,
+            anchor="lm"
+        )
+
+        # ----------------------------------------------------
+        # WAGER
+        # ----------------------------------------------------
+
+        wager = player["wagered"]
+
+        try:
+
+            wager_text = (
+                f"{Decimal(str(wager)):,.0f} points"
+            )
+
+        except Exception:
+
+            wager_text = (
+                f"{wager} points"
+            )
+
+        draw.text(
+            (
+                row_x + 610,
+                y + 27
+            ),
+            wager_text,
+            fill=(150, 155, 170),
+            font=points_font,
+            anchor="rm"
+        )
+
+        # ----------------------------------------------------
+        # PRIZE
+        # ----------------------------------------------------
+
+        prize = RACE_PRIZES.get(
+            position,
+            "$0"
+        )
+
+        prize_color = (
+            (255, 220, 0)
+            if position <= 3
+            else (70, 210, 90)
+        )
+
+        draw.text(
+            (
+                row_x + 795,
+                y + 27
+            ),
+            prize,
+            fill=prize_color,
+            font=prize_font,
+            anchor="rm"
+        )
+
+    # --------------------------------------------------------
+    # FOOTER
+    # --------------------------------------------------------
+
+    footer_y = (
+        start_y
+        + 10 * row_height
+        + 10
+    )
+
+    draw.text(
+        (
+            width // 2,
+            footer_y
+        ),
+        "Top 10 players by wager",
+        fill=(90, 95, 115),
+        font=small_font,
+        anchor="ma"
+    )
+
+    # --------------------------------------------------------
+    # SAVE TO MEMORY
+    # --------------------------------------------------------
+
+    output = io.BytesIO()
+
+    image.save(
+        output,
+        format="PNG"
+    )
+
+    output.seek(0)
+
+    return output
+
+
+# ============================================================
+# RACE COMMAND
+# ============================================================
+
+@bot.command()
+async def race(ctx):
+
+    try:
+
+        # ====================================================
+        # GET TOP 10
+        #
+        # IMPORTANT:
+        # Change "wagered" below if your database uses a
+        # different column name for total wager.
+        # ====================================================
+
+        rows = await db.pool.fetch(
+            """
+            SELECT
+                user_id,
+                wagered
+            FROM users
+            WHERE wagered > 0
+            ORDER BY wagered DESC
+            LIMIT 10
+            """
+        )
+
+        # ----------------------------------------------------
+        # NO PLAYERS
+        # ----------------------------------------------------
+
+        if not rows:
+
+            return await ctx.send(
+                embed=emb(
+                    "Summer Wager Race",
+                    "There are currently no players in the race.",
+                    RED
+                )
+            )
+
+        # ====================================================
+        # LOAD DISCORD USERS
+        # ====================================================
+
+        players = []
+
+        for row in rows:
+
+            user_id = int(
+                row["user_id"]
+            )
+
+            user = ctx.guild.get_member(
+                user_id
+            )
+
+            if user is None:
+
+                try:
+
+                    user = await bot.fetch_user(
+                        user_id
+                    )
+
+                except Exception:
+
+                    continue
+
+            players.append(
+                {
+                    "user": user,
+                    "wagered": row["wagered"]
+                }
+            )
+
+        # ----------------------------------------------------
+        # CREATE IMAGE
+        # ----------------------------------------------------
+
+        image = await create_race_image(
+            ctx,
+            players
+        )
+
+        # ----------------------------------------------------
+        # SEND IMAGE ONLY
+        # ----------------------------------------------------
+
+        file = discord.File(
+            image,
+            filename="race.png"
+        )
+
+        await ctx.send(
+            file=file
+        )
+
+    except Exception as e:
+
+        print(
+            f"Race command error: {e}"
+        )
+
+        await ctx.send(
+            embed=emb(
+                "Race Error",
+                (
+                    "Something went wrong while "
+                    "creating the wager race.\n\n"
+                    f"`{e}`"
+                ),
+                RED
+            )
+        )
+
+
+### Prize settings
+
+If you want to change prizes later, you only need to edit this:
+
+RACE_PRIZES = {
+    1: "$5",
+    2: "$5",
+    3: "$5",
+    4: "$1",
+    5: "$1",
+    6: "$1",
+    7: "$1",
+    8: "$1",
+    9: "$1",
+    10: "$1"
+}
+
+
+Then use:
+.race
+
+
+**Important:** this code assumes your `users` table has a `wagered` column containing each user's total wager. If your bot stores wager under a different column/table, tell me the column name (or paste your `users` table schema), and that one query can be changed.
 @bot.command()
 async def help(ctx):
     total=await db.pool.fetchval('SELECT COUNT(*) FROM users')
