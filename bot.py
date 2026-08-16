@@ -456,6 +456,27 @@ async def unfreeze(ctx): await db.set_frozen(False); await ctx.send(embed=emb('A
 async def history(ctx, member: discord.Member=None):
     member=member or ctx.author; rows=await db.pool.fetch('SELECT game,amount,outcome,payout,created_at FROM bets WHERE user_id=$1 ORDER BY id DESC LIMIT 10',member.id)
     text='\n'.join(f'`{i+1}.` **{r["game"]}** | {money(r["amount"])} | {r["outcome"]} | {money(r["payout"])}×' for i,r in enumerate(rows)) or 'No bets yet.'; await ctx.send(embed=emb('Latest 10 bets',text))
+    # ============================================================
+# GAME WIN LOG CHANNEL
+# ============================================================
+
+LOG_CHANNEL_ID = None
+
+
+@bot.command()
+@commands.check(admin)
+async def loghistory(ctx, channel: discord.TextChannel):
+    global LOG_CHANNEL_ID
+
+    LOG_CHANNEL_ID = channel.id
+
+    await ctx.send(
+        embed=emb(
+            'Game History Channel Updated',
+            f'Game win logs will now be sent to {channel.mention}.',
+            GREEN
+        )
+    )
 
 @bot.command(aliases=['cf','coinfip'])
 async def coinflip(ctx, amount: str, choice: str=None):
