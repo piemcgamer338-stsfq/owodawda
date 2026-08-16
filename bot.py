@@ -1294,8 +1294,17 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
     if bombs < 1 or bombs > 20:
         return await ctx.send(
             embed=emb(
-                'Invalid mine count',
-                'Choose from **1 to 20 bombs**.',
+                "Invalid Mine Count",
+                "Choose between **1 and 20 bombs**.",
+                RED
+            )
+        )
+
+    if amount <= 0:
+        return await ctx.send(
+            embed=emb(
+                "Invalid Bet",
+                "Bet amount must be greater than **0 points**.",
                 RED
             )
         )
@@ -1303,106 +1312,219 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
     if not await require_game(ctx, amount):
         return
 
-    # --------------------------------------------------------
-    # MINES MULTIPLIER
-    # Higher bomb count = higher multiplier per safe tile
-    # Based on the probability of successfully hitting a safe tile.
-    # --------------------------------------------------------
-
-    total_tiles = 25
-    safe_tiles = total_tiles - bombs
-
-    # Chance of hitting a safe tile
-    safe_probability = Decimal(safe_tiles) / Decimal(total_tiles)
-
-    # House edge
-    house_edge = Decimal("0.96")
-
-    # Multiplier for each revealed safe tile
-    tile_mult = (
-        (Decimal("1") / safe_probability) * house_edge
-    ).quantize(Decimal("0.01"))
-
-    # Don't allow an absurdly low multiplier
-    if tile_mult < Decimal("1.01"):
-        tile_mult = Decimal("1.01")
+    DIAMOND = "<:diamond:1538364736251629640>"
+    BOMB = "<:bomb:1538364767201271808>"
+    HIDDEN = "⬛"
 
     # --------------------------------------------------------
-    # RANDOM RESULT
+    # PROVABLY FAIR SEED
     # --------------------------------------------------------
 
-    revealed = random.randint(
+    server_seed, client_seed, server_hash = seed()
+
+    # --------------------------------------------------------
+    # CREATE BOARD
+    # --------------------------------------------------------
+
+    positions = list(range(25))
+    bomb_positions = set(random.sample(positions, bombs))
+
+    # --------------------------------------------------------
+    # MULTIPLIER
+    # Depends on BOTH:
+    #   - number of bombs
+    #   - number of diamonds revealed
+    # --------------------------------------------------------
+
+    def get_multiplier(revealed):
+        if revealed <= 0:
+            return Decimal("1.00")
+
+        multiplier = Decimal("1.00")
+
+        for i in range(revealed):
+            safe_left = 25 - i
+            total_left = 25 - bombs - i
+
+            multiplier *= (
+                Decimal(safe_left) /
+                Decimal(total_left)
+            )
+
+        # Small house edge
+        multiplier *= Decimal("0.97")
+
+        return multiplier.quantize(
+            Decimal("0.01")
+        )
+
+    # --------------------------------------------------------
+    # PLAY THE GAME
+    # --------------------------------------------------------
+
+    revealed_positions = set()
+
+    # Simulate how many tiles the player gets before bomb
+    safe_tiles = 25 - bombs
+
+    revealed_count = random.randint(
         0,
         min(8, safe_tiles)
     )
 
-    # Chance that the player survives all selected reveals
-    won = revealed > 0 and random.random() < float(
-        Decimal("0.90") ** revealed
+    # --------------------------------------------------------
+    # BOMB HIT
+    # --------------------------------------------------------
+
+    if revealed_count == 0:
+        hit_position = random.choice(
+            list(bomb_positions)
+        )
+
+        grid = []
+
+        for i in range(25):
+            if i == hit_position:
+                grid.append(BOMB)
+            else:
+                grid.append(HIDDEN)
+
+        grid_text = " ".join(grid)
+
+        loss_embed = discord.Embed(
+            title="💥 Mines — You Lost",
+            description=(
+                f"**Bet:** {money(amount)} points\n\n"
+                f"You hit a bomb immediately!\n\n"
+                f"{grid_text}\n\n"
+                f"**Lost:** {money(amount)} points\n"
+                f"**Payout:** `0.00 points`\n\n"
+                f"🔒 **Server Hash:** `{server_hash}`\n"
+                f"**Server Seed:** `{server_seed}`\n"
+                f"**Client Seed:** `{client_seed}`"
+            ),
+            color=RED
+        )
+
+        loss_embed.set_footer(
+            text="LiteBet • Mines"
+        )
+
+        # IMPORTANT:
+        # This is FINAL.
+        # No delayed edit.
+        # No finish(..., won=True).
+        # No balance credit.
+        await ctx.send(embed=loss_embed)
+
+        return
+
+    # --------------------------------------------------------
+    # WIN
+    # --------------------------------------------------------
+
+    safe_choices = [
+        p for p in positions
+        if p not in bomb_positions
+    ]
+
+    revealed_positions = set(
+        random.sample(
+            safe_choices,
+            revealed_count
+        )
+    )
+
+    multiplier = get_multiplier(
+        revealed_count
+    )
+
+    payout = (
+        amount * multiplier
+    ).quantize(
+        Decimal("0.01")
+    )
+
+    profit = (
+        payout - amount
+    ).quantize(
+        Decimal("0.01")
     )
 
     # --------------------------------------------------------
-    # COMPOUND MULTIPLIER
+    # CREATE WINNING BOARD
     # --------------------------------------------------------
-
-    if revealed > 0:
-        mult = (
-            tile_mult ** revealed
-        ).quantize(Decimal("0.01"))
-    else:
-        mult = Decimal("1.00")
-
-    # --------------------------------------------------------
-    # GRID
-    # --------------------------------------------------------
-
-    s, c, h = seed()
-
-    safe_positions = random.sample(
-        range(25),
-        min(revealed, safe_tiles)
-    )
 
     grid = []
 
     for i in range(25):
-        if i in safe_positions:
-            grid.append("💎")
+
+        if i in revealed_positions:
+            grid.append(DIAMOND)
+
         else:
-            grid.append("⬛")
+            grid.append(HIDDEN)
 
     grid_text = " ".join(grid)
 
     # --------------------------------------------------------
-    # RESULT
+    # CREDIT PAYOUT ONCE
     # --------------------------------------------------------
 
-    profit = (
-        amount * (mult - Decimal("1"))
-        if won
-        else Decimal("0")
+    await db.balance(
+        ctx.author.id,
+        payout
     )
 
-    await finish(
-        ctx,
-        'Mines',
-        amount,
-        won,
-        mult,
-        (
-            f'**Bet Amount:** {money(amount)}\n'
-            f'**Bombs:** {bombs} 💣\n'
-            f'**Safe Tiles:** {safe_tiles} 💎\n'
-            f'**Safe Tile Multiplier:** {tile_mult:.2f}×\n'
-            f'**Current Multiplier:** {mult:.2f}×\n'
-            f'**Profits:** {money(profit)} points\n\n'
-            f'{grid_text}\n\n'
-            f'🔒 Hash: `{h}`\n'
-            f'Server Seed: `{s}`\n'
-            f'Client Seed: `{c}`'
-        )
+    await db.pool.execute(
+        """
+        UPDATE users
+        SET games_won = games_won + 1
+        WHERE user_id = $1
+        """,
+        ctx.author.id
     )
-    
+
+    await db.pool.execute(
+        """
+        INSERT INTO bets
+        (user_id, game, amount, outcome, payout)
+        VALUES ($1, $2, $3, $4, $5)
+        """,
+        ctx.author.id,
+        "Mines",
+        amount,
+        "win",
+        payout
+    )
+
+    # --------------------------------------------------------
+    # WIN MESSAGE
+    # --------------------------------------------------------
+
+    win_embed = discord.Embed(
+        title="💎 Mines — You Won",
+        description=(
+            f"**Bet:** {money(amount)} points\n"
+            f"**Diamonds:** {revealed_count}\n"
+            f"**Multiplier:** `{multiplier:.2f}x`\n\n"
+            f"{grid_text}\n\n"
+            f"**Profit:** {money(profit)} points\n"
+            f"**Payout:** {money(payout)} points\n\n"
+            f"🔒 **Server Hash:** `{server_hash}`\n"
+            f"**Server Seed:** `{server_seed}`\n"
+            f"**Client Seed:** `{client_seed}`"
+        ),
+        color=GREEN
+    )
+
+    win_embed.set_footer(
+        text="LiteBet • Mines"
+    )
+
+    await ctx.send(
+        embed=win_embed
+    )
 @bot.command()
 async def tower(ctx, amount: Decimal, difficulty: str = None):
 
