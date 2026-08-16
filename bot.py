@@ -3208,29 +3208,34 @@ class MinesView(discord.ui.View):
     # MULTIPLIER
     # ========================================================
 
-    def multiplier(self):
+  def multiplier(self):
 
-        if self.revealed <= 0:
-            return Decimal('1.00')
+    if self.revealed <= 0:
+        return Decimal('1.00')
 
-        base_multiplier = Decimal('1.00')
+    multiplier = Decimal('1.00')
+    house_edge = Decimal('0.97')
 
-        for i in range(self.revealed):
+    for i in range(self.revealed):
 
-            remaining_safe = self.safe_tiles - i
-            remaining_tiles = self.total_tiles - i
+        remaining_tiles = self.total_tiles - i
+        remaining_safe = self.safe_tiles - i
 
-            if remaining_safe <= 0:
-                break
+        if remaining_safe <= 0:
+            break
 
-            # Probability-based step
-            step = (
-                Decimal(remaining_tiles)
-                / Decimal(remaining_safe)
-            )
+        step = (
+            Decimal(remaining_tiles)
+            / Decimal(remaining_safe)
+        )
 
-            base_multiplier *= step
+        step *= house_edge
 
+        multiplier *= step
+
+    return multiplier.quantize(
+        Decimal('0.01')
+    )
         # ----------------------------------------------------
         # APPLY LOWER PAYOUT FACTOR
         # ----------------------------------------------------
