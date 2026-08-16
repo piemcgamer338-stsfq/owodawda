@@ -16,6 +16,8 @@ from imaging import (
 )
 from english_words import get_english_words_set
 
+from ltc_watcher import ltc_watcher 
+
 from bip_utils import Bip44, Bip44Coins, Bip44Changes 
 
 ENGLISH_WORDS = get_english_words_set(['web2'], lower=True)
