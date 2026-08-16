@@ -167,9 +167,10 @@ WHERE id = 1;
 
 # $0.0045 USD = 1 point
 #
-# Therefore:
+# Example:
 #
-# $0.10 / $0.0045 = 22.22 points
+# $0.10 / $0.0045 = 22.222...
+# = 22.22 points
 #
 USD_PER_POINT = Decimal("0.0045")
 
@@ -212,7 +213,7 @@ class Database:
             await c.execute(
                 """
                 INSERT INTO users(user_id)
-                VALUES($1)
+                VALUES($1::BIGINT)
                 ON CONFLICT DO NOTHING
                 """,
                 uid
@@ -222,7 +223,7 @@ class Database:
                 """
                 SELECT *
                 FROM users
-                WHERE user_id=$1
+                WHERE user_id=$1::BIGINT
                 """,
                 uid
             )
@@ -239,7 +240,7 @@ class Database:
             await c.execute(
                 """
                 INSERT INTO users(user_id)
-                VALUES($1)
+                VALUES($1::BIGINT)
                 ON CONFLICT DO NOTHING
                 """,
                 uid
@@ -248,8 +249,8 @@ class Database:
             return await c.fetchval(
                 """
                 UPDATE users
-                SET balance = balance + $2
-                WHERE user_id=$1
+                SET balance = balance + $2::NUMERIC
+                WHERE user_id=$1::BIGINT
                 RETURNING balance
                 """,
                 uid,
@@ -270,7 +271,7 @@ class Database:
                 await c.execute(
                     """
                     INSERT INTO users(user_id)
-                    VALUES($1)
+                    VALUES($1::BIGINT)
                     ON CONFLICT DO NOTHING
                     """,
                     uid
@@ -280,15 +281,15 @@ class Database:
                     """
                     UPDATE users
                     SET
-                        balance = balance - $2,
-                        wagered = wagered + $2,
-                        daily_wager = daily_wager + $2,
-                        weekly_wager = weekly_wager + $2,
-                        monthly_wager = monthly_wager + $2,
+                        balance = balance - $2::NUMERIC,
+                        wagered = wagered + $2::NUMERIC,
+                        daily_wager = daily_wager + $2::NUMERIC,
+                        weekly_wager = weekly_wager + $2::NUMERIC,
+                        monthly_wager = monthly_wager + $2::NUMERIC,
                         games_played = games_played + 1
                     WHERE
-                        user_id=$1
-                        AND balance >= $2
+                        user_id=$1::BIGINT
+                        AND balance >= $2::NUMERIC
                     RETURNING balance
                     """,
                     uid,
@@ -309,7 +310,7 @@ class Database:
             await c.execute(
                 """
                 INSERT INTO users(user_id)
-                VALUES($1)
+                VALUES($1::BIGINT)
                 ON CONFLICT DO NOTHING
                 """,
                 uid
@@ -318,10 +319,10 @@ class Database:
             result = await c.fetchval(
                 """
                 UPDATE users
-                SET balance = balance - $2
+                SET balance = balance - $2::NUMERIC
                 WHERE
-                    user_id=$1
-                    AND balance >= $2
+                    user_id=$1::BIGINT
+                    AND balance >= $2::NUMERIC
                 RETURNING balance
                 """,
                 uid,
@@ -332,7 +333,7 @@ class Database:
 
 
     # ========================================================
-    # CREDIT DEPOSIT
+    # CREDIT DEPOSIT MANUALLY
     # ========================================================
 
     async def credit_deposit(self, uid, amount):
@@ -342,7 +343,7 @@ class Database:
             await c.execute(
                 """
                 INSERT INTO users(user_id)
-                VALUES($1)
+                VALUES($1::BIGINT)
                 ON CONFLICT DO NOTHING
                 """,
                 uid
@@ -352,10 +353,10 @@ class Database:
                 """
                 UPDATE users
                 SET
-                    balance = balance + $2,
+                    balance = balance + $2::NUMERIC,
                     deposited_points =
-                        deposited_points + $2
-                WHERE user_id=$1
+                        deposited_points + $2::NUMERIC
+                WHERE user_id=$1::BIGINT
                 RETURNING balance
                 """,
                 uid,
@@ -433,9 +434,9 @@ class Database:
                 """
                 UPDATE users
                 SET
-                    deposit_index=$2,
-                    deposit_address=$3
-                WHERE user_id=$1
+                    deposit_index=$2::INT,
+                    deposit_address=$3::TEXT
+                WHERE user_id=$1::BIGINT
                 """,
                 uid,
                 index,
@@ -468,11 +469,11 @@ class Database:
                     payout
                 )
                 VALUES(
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5
+                    $1::BIGINT,
+                    $2::TEXT,
+                    $3::NUMERIC,
+                    $4::TEXT,
+                    $5::NUMERIC
                 )
                 """,
                 uid,
@@ -488,8 +489,8 @@ class Database:
                     """
                     UPDATE users
                     SET rateback_loss =
-                        rateback_loss + $2
-                    WHERE user_id=$1
+                        rateback_loss + $2::NUMERIC
+                    WHERE user_id=$1::BIGINT
                     """,
                     uid,
                     amount
@@ -501,9 +502,9 @@ class Database:
                     """
                     UPDATE users
                     SET
-                        balance = balance + $2,
+                        balance = balance + $2::NUMERIC,
                         games_won = games_won + 1
-                    WHERE user_id=$1
+                    WHERE user_id=$1::BIGINT
                     """,
                     uid,
                     payout
@@ -524,7 +525,7 @@ class Database:
                     """
                     SELECT rateback_loss
                     FROM users
-                    WHERE user_id=$1
+                    WHERE user_id=$1::BIGINT
                     FOR UPDATE
                     """,
                     uid
@@ -548,8 +549,8 @@ class Database:
                     UPDATE users
                     SET
                         rateback_loss=0,
-                        balance=balance+$2
-                    WHERE user_id=$1
+                        balance=balance+$2::NUMERIC
+                    WHERE user_id=$1::BIGINT
                     """,
                     uid,
                     rb
@@ -566,16 +567,15 @@ class Database:
 
         async with self.pool.acquire() as c:
 
-            return (
-                await c.fetchval(
-                    """
-                    SELECT value
-                    FROM settings
-                    WHERE key='frozen'
-                    """
-                )
-                == "1"
+            value = await c.fetchval(
+                """
+                SELECT value
+                FROM settings
+                WHERE key='frozen'
+                """
             )
+
+            return value == "1"
 
 
     # ========================================================
@@ -594,10 +594,10 @@ class Database:
                 )
                 VALUES(
                     'frozen',
-                    $1
+                    $1::TEXT
                 )
                 ON CONFLICT(key)
-                DO UPDATE SET value=$1
+                DO UPDATE SET value=$1::TEXT
                 """,
                 "1" if yes else "0"
             )
@@ -629,13 +629,11 @@ class Database:
         )
 
         if ltc <= 0:
-
             raise ValueError(
                 "LTC amount must be greater than zero"
             )
 
         if ltc_usd_price is None:
-
             raise ValueError(
                 "LTC/USD price is required"
             )
@@ -645,7 +643,6 @@ class Database:
         )
 
         if ltc_usd_price <= 0:
-
             raise ValueError(
                 "LTC/USD price must be greater than zero"
             )
@@ -665,7 +662,9 @@ class Database:
         #
         # Example:
         #
-        # $0.10 / $0.0045 = 22.22 points
+        # 0.10 USD / 0.0045
+        # = 22.222...
+        # = 22.22 points
         #
         # ====================================================
 
@@ -680,7 +679,7 @@ class Database:
             async with c.transaction():
 
                 # =================================================
-                # CHECK IF TRANSACTION ALREADY EXISTS
+                # CHECK EXISTING TRANSACTION
                 # =================================================
 
                 existing = await c.fetchrow(
@@ -691,7 +690,7 @@ class Database:
                         points,
                         ltc
                     FROM deposits
-                    WHERE txid=$1
+                    WHERE txid=$1::TEXT
                     FOR UPDATE
                     """,
                     txid
@@ -717,29 +716,32 @@ class Database:
                         }
 
                     # ---------------------------------------------
-                    # Update pending deposit
+                    # Keep the original points for a pending
+                    # deposit.
                     #
-                    # This also repairs deposits that were created
-                    # before the new USD conversion was installed.
+                    # This prevents the user's points changing
+                    # because LTC/USD moved while waiting for
+                    # confirmations.
+                    # ---------------------------------------------
+
+                    stored_points = existing["points"]
+
+                    # ---------------------------------------------
+                    # Update confirmations only
                     # ---------------------------------------------
 
                     await c.execute(
                         """
                         UPDATE deposits
-                        SET
-                            confirmations=$2,
-                            points=$3,
-                            ltc=$4
-                        WHERE txid=$1
+                        SET confirmations=$2::INT
+                        WHERE txid=$1::TEXT
                         """,
                         txid,
-                        confirmations,
-                        points,
-                        ltc
+                        confirmations
                     )
 
                     # ---------------------------------------------
-                    # Not enough confirmations
+                    # Still pending
                     # ---------------------------------------------
 
                     if confirmations < required:
@@ -748,7 +750,7 @@ class Database:
                             "inserted": False,
                             "credited": False,
                             "already_credited": False,
-                            "points": points
+                            "points": stored_points
                         }
 
                     # ---------------------------------------------
@@ -759,27 +761,12 @@ class Database:
                         """
                         UPDATE deposits
                         SET
-                            confirmations=$2,
-                            points=$3,
-                            ltc=$4,
+                            confirmations=$2::INT,
                             status='confirmed',
-                            credited_at=$5
+                            credited_at=$3::TIMESTAMPTZ
                         WHERE
-                            txid=$1
+                            txid=$1::TEXT
                             AND status!='confirmed'
                         RETURNING points
                         """,
                         txid,
-                        confirmations,
-                        points,
-                        ltc,
-                        datetime.now(timezone.utc)
-                    )
-
-                    if not updated:
-
-                        return {
-                            "inserted": False,
-                            "credited": False,
-                            "already_credited": True,
-                          
