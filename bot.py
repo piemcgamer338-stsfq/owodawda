@@ -1859,11 +1859,266 @@ async def ttt(ctx, member: discord.Member, amount: Decimal):
 
 
 
+```python
+# ============================================================
+# LEADERBOARD
+# ============================================================
+
+class LeaderboardView(discord.ui.View):
+
+    def __init__(self, author_id):
+        super().__init__(timeout=180)
+        self.author_id = author_id
+        self.period = "daily"
+
+    async def update_leaderboard(self, interaction):
+
+        rows = await db.pool.fetch(
+            """
+            SELECT user_id, daily_wager, weekly_wager, monthly_wager
+            FROM users
+            ORDER BY
+                CASE
+                    WHEN $1 = 'daily' THEN daily_wager
+                    WHEN $1 = 'weekly' THEN weekly_wager
+                    WHEN $1 = 'monthly' THEN monthly_wager
+                END DESC
+            LIMIT 10
+            """,
+            self.period
+        )
+
+        if self.period == "daily":
+            title = "🏆 Daily Leaderboard"
+            period_text = "Daily"
+        elif self.period == "weekly":
+            title = "🏆 Weekly Leaderboard"
+            period_text = "Weekly"
+        else:
+            title = "🏆 Monthly Leaderboard"
+            period_text = "Monthly"
+
+        if not rows:
+            description = "No wagers yet."
+        else:
+            lines = []
+
+            medals = ["🥇", "🥈", "🥉"]
+
+            for i, row in enumerate(rows, start=1):
+
+                user = interaction.guild.get_member(
+                    row["user_id"]
+                )
+
+                if user:
+                    username = user.display_name
+                else:
+                    try:
+                        user = await bot.fetch_user(
+                            row["user_id"]
+                        )
+                        username = user.display_name
+                    except Exception:
+                        username = "Unknown User"
+
+                if self.period == "daily":
+                    wager = row["daily_wager"]
+                elif self.period == "weekly":
+                    wager = row["weekly_wager"]
+                else:
+                    wager = row["monthly_wager"]
+
+                if i <= 3:
+                    rank = medals[i - 1]
+                else:
+                    rank = f"`{i}`"
+
+                lines.append(
+                    f"{rank} **{username}** — "
+                    f"**{money(wager)} points**"
+                )
+
+            description = "\n".join(lines)
+
+        embed = discord.Embed(
+            title=title,
+            description=(
+                f"Showing the **Top 10 {period_text.lower()} wagers**.\n\n"
+                f"{description}"
+            ),
+            color=0x5865F2
+        )
+
+        embed.set_footer(
+            text="LiteBet • Leaderboard"
+        )
+
+        await interaction.response.edit_message(
+            embed=embed,
+            view=self
+        )
+
+    # ========================================================
+    # DAILY
+    # ========================================================
+
+    @discord.ui.button(
+        label="Daily",
+        style=discord.ButtonStyle.success
+    )
+    async def daily(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        self.period = "daily"
+
+        await self.update_leaderboard(
+            interaction
+        )
+
+    # ========================================================
+    # WEEKLY
+    # ========================================================
+
+    @discord.ui.button(
+        label="Weekly",
+        style=discord.ButtonStyle.primary
+    )
+    async def weekly(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        self.period = "weekly"
+
+        await self.update_leaderboard(
+            interaction
+        )
+
+    # ========================================================
+    # MONTHLY
+    # ========================================================
+
+    @discord.ui.button(
+        label="Monthly",
+        style=discord.ButtonStyle.primary
+    )
+    async def monthly(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        self.period = "monthly"
+
+        await self.update_leaderboard(
+            interaction
+        )
+
+    # ========================================================
+    # ONLY COMMAND USER CAN USE BUTTONS
+    # ========================================================
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        if interaction.user.id != self.author_id:
+
+            await interaction.response.send_message(
+                "❌ Only the person who opened this leaderboard can use these buttons.",
+                ephemeral=True
+            )
+
+            return False
+
+        return True
+
+
+# ============================================================
+# LEADERBOARD COMMAND
+# ============================================================
+
 @bot.command(aliases=['lb'])
 async def leaderboard(ctx):
-    rows=await db.pool.fetch('SELECT user_id,daily_wager,weekly_wager,monthly_wager FROM users ORDER BY daily_wager DESC LIMIT 10')
-    text='\n'.join(f'`{i+1}.` <@{r["user_id"]}> — **{money(r["daily_wager"])}** wagered' for i,r in enumerate(rows)) or 'No wagers yet.'
-    await ctx.send(embed=emb('🏆 Daily Leaderboard',text))
+
+    rows = await db.pool.fetch(
+        """
+        SELECT user_id, daily_wager, weekly_wager, monthly_wager
+        FROM users
+        ORDER BY daily_wager DESC
+        LIMIT 10
+        """
+    )
+
+    if not rows:
+
+        embed = discord.Embed(
+            title="🏆 Leaderboard",
+            description="No wagers yet.",
+            color=0x5865F2
+        )
+
+    else:
+
+        lines = []
+
+        medals = ["🥇", "🥈", "🥉"]
+
+        for i, row in enumerate(rows, start=1):
+
+            member = ctx.guild.get_member(
+                row["user_id"]
+            )
+
+            if member:
+                username = member.display_name
+            else:
+                try:
+                    user = await bot.fetch_user(
+                        row["user_id"]
+                    )
+                    username = user.display_name
+                except Exception:
+                    username = "Unknown User"
+
+            if i <= 3:
+                rank = medals[i - 1]
+            else:
+                rank = f"`{i}`"
+
+            lines.append(
+                f"{rank} **{username}** — "
+                f"**{money(row['daily_wager'])} points**"
+            )
+
+        embed = discord.Embed(
+            title="🏆 Leaderboard",
+            description=(
+                "**Showing Top 10 daily wagers.**\n\n"
+                + "\n".join(lines)
+            ),
+            color=0x5865F2
+        )
+
+    embed.set_footer(
+        text="LiteBet • Leaderboard"
+    )
+
+    view = LeaderboardView(
+        ctx.author.id
+    )
+
+    await ctx.send(
+        embed=embed,
+        view=view
+    )
+
 
 # ============================================================
 # HOUSE WALLET
