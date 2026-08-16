@@ -1623,28 +1623,45 @@ async def deposit(ctx):
         )
 
     try:
-        # Get / create user
+
+        # ====================================================
+        # GET / CREATE USER
+        # ====================================================
+
         u = await db.user(ctx.author.id)
 
-        # ----------------------------------------------------
-        # REUSE EXISTING DEPOSIT ADDRESS
-        # ----------------------------------------------------
+        # ====================================================
+        # REUSE EXISTING ADDRESS
+        # ====================================================
 
-        existing_address = u.get('deposit_address')
+        existing_address = u['deposit_address']
 
         if existing_address:
+
             address = existing_address
 
         else:
-            # ------------------------------------------------
-            # GET NEXT DEPOSIT INDEX
-            # ------------------------------------------------
 
-            index = int(u['deposit_index'])
+            # =================================================
+            # GET GLOBAL UNIQUE DEPOSIT INDEX
+            # =================================================
+            #
+            # DO NOT use u['deposit_index'] here.
+            #
+            # This gives every user a different index:
+            #
+            # User 1 -> 0
+            # User 2 -> 1
+            # User 3 -> 2
+            # User 4 -> 3
+            #
+            # =================================================
 
-            # ------------------------------------------------
-            # DERIVE LTC ADDRESS FROM XPUB
-            # ------------------------------------------------
+            index = await db.get_next_deposit_index()
+
+            # =================================================
+            # DERIVE LTC ADDRESS
+            # =================================================
 
             wallet = Bip44.FromExtendedKey(
                 xpub.strip(),
@@ -1659,19 +1676,13 @@ async def deposit(ctx):
                 .ToAddress()
             )
 
-            # ------------------------------------------------
-            # SAVE ADDRESS + MOVE INDEX
-            # ------------------------------------------------
+            # =================================================
+            # SAVE ADDRESS
+            # =================================================
 
-            await db.pool.execute(
-                """
-                UPDATE users
-                SET
-                    deposit_index = deposit_index + 1,
-                    deposit_address = $2
-                WHERE user_id = $1
-                """,
+            await db.save_deposit_address(
                 ctx.author.id,
+                index,
                 address
             )
 
@@ -1682,12 +1693,12 @@ async def deposit(ctx):
         deposit_embed = discord.Embed(
             title='💰 Your Litecoin Deposit Address',
             description=(
-                f'**Send Litecoin (LTC) to the address below.**\n\n'
+                '**Send Litecoin (LTC) to the address below.**\n\n'
                 f'`{address}`\n\n'
-                f'**Network:** Litecoin Mainnet\n'
-                f'**Currency:** LTC\n\n'
-                f'Your deposit will be credited after the required '
-                f'confirmations.'
+                '**Network:** Litecoin Mainnet\n'
+                '**Currency:** LTC\n\n'
+                'Your deposit will be credited automatically '
+                'after the required confirmations.'
             ),
             color=GREEN,
             timestamp=datetime.now(timezone.utc)
@@ -1710,16 +1721,19 @@ async def deposit(ctx):
             await ctx.send(
                 embed=emb(
                     'Deposit Address Sent',
-                    'Your **Litecoin (LTC)** deposit address has been sent to your DMs.',
+                    (
+                        'Your **Litecoin (LTC)** deposit address '
+                        'has been sent to your DMs.'
+                    ),
                     GREEN
                 )
             )
 
         except discord.Forbidden:
 
-            # ------------------------------------------------
-            # DMs CLOSED
-            # ------------------------------------------------
+            # =================================================
+            # DMS CLOSED
+            # =================================================
 
             await ctx.send(
                 embed=emb(
@@ -1727,7 +1741,7 @@ async def deposit(ctx):
                     (
                         'I could not send your deposit address '
                         'because your DMs are closed.\n\n'
-                        f'**Your Litecoin Address:**\n'
+                        '**Your Litecoin Address:**\n'
                         f'`{address}`'
                     ),
                     RED
@@ -1743,7 +1757,10 @@ async def deposit(ctx):
         await ctx.send(
             embed=emb(
                 'Deposit Error',
-                'I could not generate your Litecoin deposit address. Please try again.',
+                (
+                    'I could not generate your Litecoin '
+                    'deposit address. Please try again.'
+                ),
                 RED
             )
         )
