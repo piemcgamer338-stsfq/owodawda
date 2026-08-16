@@ -869,32 +869,6 @@ async def race(ctx):
             )
         )
 
-
-### Prize settings
-
-If you want to change prizes later, you only need to edit this:
-
-RACE_PRIZES = {
-    1: "$5",
-    2: "$5",
-    3: "$5",
-    4: "$1",
-    5: "$1",
-    6: "$1",
-    7: "$1",
-    8: "$1",
-    9: "$1",
-    10: "$1"
-}
-
-
-Then use:
-.race
-
-
-**Important:** this code assumes your `users` table has a `wagered` column containing each user's total wager. If your bot stores wager under a different column/table, tell me the column name (or paste your `users` table schema), and that one query can be changed.
-@bot.command()
-async def help(ctx):
     total=await db.pool.fetchval('SELECT COUNT(*) FROM users')
     await ctx.send(embed=emb('ℹ️ Help Command - Main Menu',f'Welcome to **LiteBet**, the Discord Litecoin Casino Bot.\n💡 New here? Read `.guide`\n\n**Rate:** 1 point = 0.0001 LTC\n**Total Commands:** 40+\n**Total Users:** {total}\n\n> Bot made by meow2004yr'),view=HelpView())
 # ============================================================
