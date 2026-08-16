@@ -267,6 +267,7 @@ class HelpSelect(discord.ui.Select):
                 "🔤 `.word` — Guess the hidden word"
             )
         }
+        
         @bot.command()
 async def help(ctx):
     total = await db.pool.fetchval(
