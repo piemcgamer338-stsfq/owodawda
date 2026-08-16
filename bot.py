@@ -906,6 +906,10 @@ async def race(ctx):
 # .LBRESET
 # ============================================================
 
+# ============================================================
+# LBRESET
+# ============================================================
+
 @bot.command(name="lbreset")
 @commands.has_permissions(administrator=True)
 async def lbreset(ctx):
@@ -949,6 +953,24 @@ async def lbreset(ctx):
         )
 
 
+@lbreset.error
+async def lbreset_error(ctx, error):
+
+    if isinstance(error, commands.MissingPermissions):
+
+        await ctx.send(
+            embed=emb(
+                "❌ Permission Denied",
+                "You need **Administrator** permission to use `.lbreset`.",
+                RED
+            )
+        )
+
+    else:
+
+        print(
+            f"lbreset command error: {error}"
+        )
 # ============================================================
 # LBRESET PERMISSION ERROR
 # ============================================================
