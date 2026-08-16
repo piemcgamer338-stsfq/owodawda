@@ -304,9 +304,7 @@ async def on_ready():
 async def reset_wagers():
     async with db.pool.acquire() as c: await c.execute('UPDATE users SET daily_wager=0')
 
-    # `.race` Wager Race Command
-
-# ============================================================
+ # ============================================================
 # WAGER RACE
 # ============================================================
 
@@ -322,7 +320,6 @@ from PIL import Image, ImageDraw, ImageFont
 RACE_TITLE = "LiteBet WAGER RACE"
 RACE_SUBTITLE = "$24 RACE  -  LiteBet CASINO"
 
-# Prize for each position
 RACE_PRIZES = {
     1: "$5",
     2: "$5",
@@ -343,15 +340,16 @@ RACE_PRIZES = {
 
 def race_font(size, bold=False):
 
-    possible_fonts = []
-
     if bold:
+
         possible_fonts = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
             "arialbd.ttf"
         ]
+
     else:
+
         possible_fonts = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
@@ -361,10 +359,12 @@ def race_font(size, bold=False):
     for path in possible_fonts:
 
         try:
+
             return ImageFont.truetype(
                 path,
                 size
             )
+
         except Exception:
             continue
 
@@ -399,22 +399,23 @@ async def get_race_avatar(user):
             io.BytesIO(data)
         ).convert("RGBA")
 
+        # Bigger avatar
         avatar = avatar.resize(
-            (42, 42),
+            (50, 50),
             Image.Resampling.LANCZOS
         )
 
-        # Circular avatar mask
+        # Circular mask
         mask = Image.new(
             "L",
-            (42, 42),
+            (50, 50),
             0
         )
 
         mask_draw = ImageDraw.Draw(mask)
 
         mask_draw.ellipse(
-            (0, 0, 42, 42),
+            (0, 0, 50, 50),
             fill=255
         )
 
@@ -437,8 +438,8 @@ async def get_race_avatar(user):
 
 async def create_race_image(ctx, players):
 
-    width = 900
-    height = 850
+    width = 1000
+    height = 900
 
     image = Image.new(
         "RGB",
@@ -448,49 +449,50 @@ async def create_race_image(ctx, players):
 
     draw = ImageDraw.Draw(image)
 
-    # --------------------------------------------------------
+    # ========================================================
     # FONTS
-    # --------------------------------------------------------
+    # ========================================================
 
     title_font = race_font(
-        42,
+        48,
         bold=True
     )
 
     subtitle_font = race_font(
-        20,
+        24,
         bold=True
     )
 
     rank_font = race_font(
-        25,
+        28,
         bold=True
     )
 
     name_font = race_font(
-        17,
+        21,
         bold=True
     )
 
     points_font = race_font(
-        15
+        19,
+        bold=False
     )
 
     prize_font = race_font(
-        18,
+        22,
         bold=True
     )
 
     small_font = race_font(
-        13
+        16
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TITLE
-    # --------------------------------------------------------
+    # ========================================================
 
     draw.text(
-        (width // 2, 35),
+        (width // 2, 38),
         RACE_TITLE,
         fill=(255, 220, 0),
         font=title_font,
@@ -498,31 +500,40 @@ async def create_race_image(ctx, players):
     )
 
     draw.text(
-        (width // 2, 82),
+        (width // 2, 88),
         RACE_SUBTITLE,
         fill=(180, 185, 200),
         font=subtitle_font,
         anchor="ma"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TOP LINE
-    # --------------------------------------------------------
+    # ========================================================
 
     draw.line(
-        (180, 115, 720, 115),
+        (170, 125, 830, 125),
         fill=(45, 50, 75),
         width=2
     )
 
-    # --------------------------------------------------------
-    # RACE ROWS
-    # --------------------------------------------------------
+    # ========================================================
+    # ROW SETTINGS
+    # ========================================================
 
-    start_y = 135
-    row_height = 63
-    row_width = 820
+    start_y = 145
+
+    row_height = 70
+
+    row_width = 920
+
     row_x = 40
+
+    row_height_inside = 58
+
+    # ========================================================
+    # RACE ROWS
+    # ========================================================
 
     for position, player in enumerate(
         players[:10],
@@ -534,28 +545,32 @@ async def create_race_image(ctx, players):
             + (position - 1) * row_height
         )
 
-        # ----------------------------------------------------
-        # ROW BACKGROUND
-        # ----------------------------------------------------
+        # ====================================================
+        # ROW COLORS
+        # ====================================================
 
         if position == 1:
 
             row_color = (40, 38, 5)
+
             border_color = (255, 220, 0)
 
         elif position == 2:
 
             row_color = (35, 35, 38)
+
             border_color = (150, 150, 155)
 
         elif position == 3:
 
             row_color = (45, 28, 10)
+
             border_color = (180, 105, 35)
 
         else:
 
             row_color = (17, 21, 36)
+
             border_color = (27, 32, 50)
 
         draw.rounded_rectangle(
@@ -563,34 +578,42 @@ async def create_race_image(ctx, players):
                 row_x,
                 y,
                 row_x + row_width,
-                y + 54
+                y + row_height_inside
             ),
-            radius=8,
+            radius=9,
             fill=row_color,
             outline=border_color,
             width=2 if position <= 3 else 1
         )
 
-        # ----------------------------------------------------
-        # RANK
-        # ----------------------------------------------------
+        # ====================================================
+        # RANK COLOR
+        # ====================================================
 
         if position == 1:
+
             rank_color = (255, 225, 0)
 
         elif position == 2:
+
             rank_color = (190, 190, 195)
 
         elif position == 3:
+
             rank_color = (220, 130, 45)
 
         else:
+
             rank_color = (145, 155, 180)
+
+        # ====================================================
+        # RANK
+        # ====================================================
 
         draw.text(
             (
-                row_x + 25,
-                y + 27
+                row_x + 28,
+                y + 29
             ),
             f"#{position}",
             fill=rank_color,
@@ -598,9 +621,9 @@ async def create_race_image(ctx, players):
             anchor="lm"
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # AVATAR
-        # ----------------------------------------------------
+        # ====================================================
 
         user = player["user"]
 
@@ -608,8 +631,9 @@ async def create_race_image(ctx, players):
             user
         )
 
-        avatar_x = row_x + 75
-        avatar_y = y + 6
+        avatar_x = row_x + 82
+
+        avatar_y = y + 4
 
         if avatar:
 
@@ -628,29 +652,29 @@ async def create_race_image(ctx, players):
                 (
                     avatar_x,
                     avatar_y,
-                    avatar_x + 42,
-                    avatar_y + 42
+                    avatar_x + 50,
+                    avatar_y + 50
                 ),
                 fill=(45, 50, 65)
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # USERNAME
-        # ----------------------------------------------------
+        # ====================================================
 
         username = user.display_name
 
-        if len(username) > 18:
+        if len(username) > 20:
 
             username = (
-                username[:18]
+                username[:20]
                 + "..."
             )
 
         draw.text(
             (
-                row_x + 135,
-                y + 18
+                row_x + 150,
+                y + 29
             ),
             username,
             fill=(235, 235, 240),
@@ -658,9 +682,9 @@ async def create_race_image(ctx, players):
             anchor="lm"
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # WAGER
-        # ----------------------------------------------------
+        # ====================================================
 
         wager = player["wagered"]
 
@@ -678,34 +702,36 @@ async def create_race_image(ctx, players):
 
         draw.text(
             (
-                row_x + 610,
-                y + 27
+                row_x + 700,
+                y + 29
             ),
             wager_text,
-            fill=(150, 155, 170),
+            fill=(165, 170, 185),
             font=points_font,
             anchor="rm"
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # PRIZE
-        # ----------------------------------------------------
+        # ====================================================
 
         prize = RACE_PRIZES.get(
             position,
             "$0"
         )
 
-        prize_color = (
-            (255, 220, 0)
-            if position <= 3
-            else (70, 210, 90)
-        )
+        if position <= 3:
+
+            prize_color = (255, 220, 0)
+
+        else:
+
+            prize_color = (70, 220, 100)
 
         draw.text(
             (
-                row_x + 795,
-                y + 27
+                row_x + 890,
+                y + 29
             ),
             prize,
             fill=prize_color,
@@ -713,14 +739,14 @@ async def create_race_image(ctx, players):
             anchor="rm"
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # FOOTER
-    # --------------------------------------------------------
+    # ========================================================
 
     footer_y = (
         start_y
-        + 10 * row_height
-        + 10
+        + (10 * row_height)
+        + 15
     )
 
     draw.text(
@@ -729,14 +755,14 @@ async def create_race_image(ctx, players):
             footer_y
         ),
         "Top 10 players by wager",
-        fill=(90, 95, 115),
+        fill=(100, 105, 125),
         font=small_font,
         anchor="ma"
     )
 
-    # --------------------------------------------------------
-    # SAVE TO MEMORY
-    # --------------------------------------------------------
+    # ========================================================
+    # SAVE IMAGE
+    # ========================================================
 
     output = io.BytesIO()
 
@@ -751,7 +777,7 @@ async def create_race_image(ctx, players):
 
 
 # ============================================================
-# RACE COMMAND
+# .RACE COMMAND
 # ============================================================
 
 @bot.command()
@@ -760,11 +786,7 @@ async def race(ctx):
     try:
 
         # ====================================================
-        # GET TOP 10
-        #
-        # IMPORTANT:
-        # Change "wagered" below if your database uses a
-        # different column name for total wager.
+        # GET TOP 10 PLAYERS
         # ====================================================
 
         rows = await db.pool.fetch(
@@ -779,22 +801,22 @@ async def race(ctx):
             """
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # NO PLAYERS
-        # ----------------------------------------------------
+        # ====================================================
 
         if not rows:
 
             return await ctx.send(
                 embed=emb(
-                    "Summer Wager Race",
+                    "Wager Race",
                     "There are currently no players in the race.",
                     RED
                 )
             )
 
         # ====================================================
-        # LOAD DISCORD USERS
+        # LOAD USERS
         # ====================================================
 
         players = []
@@ -828,23 +850,23 @@ async def race(ctx):
                 }
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # CREATE IMAGE
-        # ----------------------------------------------------
+        # ====================================================
 
         image = await create_race_image(
             ctx,
             players
         )
 
-        # ----------------------------------------------------
-        # SEND IMAGE ONLY
-        # ----------------------------------------------------
-
         file = discord.File(
             image,
             filename="race.png"
         )
+
+        # ====================================================
+        # SEND IMAGE ONLY
+        # ====================================================
 
         await ctx.send(
             file=file
@@ -866,6 +888,97 @@ async def race(ctx):
                 ),
                 RED
             )
+        )
+
+
+# ============================================================
+# .LBRESET COMMAND
+# ============================================================
+# Resets the wager race leaderboard.
+#
+# IMPORTANT:
+# This resets the "wagered" column to 0 for ALL users.
+#
+# Only administrators can use this command.
+# ============================================================
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def lbreset(ctx):
+
+    try:
+
+        # ====================================================
+        # RESET ALL WAGERS
+        # ====================================================
+
+        await db.pool.execute(
+            """
+            UPDATE users
+            SET wagered = 0
+            """
+        )
+
+        # ====================================================
+        # CONFIRMATION
+        # ====================================================
+
+        await ctx.send(
+            embed=emb(
+                "🏆 Wager Race Reset",
+                (
+                    "The wager race leaderboard has been "
+                    "**completely reset**.\n\n"
+                    "All player wager amounts are now "
+                    "**0 points**.\n\n"
+                    "The new race has started!"
+                ),
+                GREEN
+            )
+        )
+
+    except Exception as e:
+
+        print(
+            f"LB reset error: {e}"
+        )
+
+        await ctx.send(
+            embed=emb(
+                "Leaderboard Reset Error",
+                (
+                    "I could not reset the wager leaderboard.\n\n"
+                    f"`{e}`"
+                ),
+                RED
+            )
+        )
+
+
+# ============================================================
+# LBRESET PERMISSION ERROR
+# ============================================================
+
+@lbreset.error
+async def lbreset_error(ctx, error):
+
+    if isinstance(
+        error,
+        commands.MissingPermissions
+    ):
+
+        await ctx.send(
+            embed=emb(
+                "❌ Permission Denied",
+                "You need **Administrator** permission to reset the wager race.",
+                RED
+            )
+        )
+
+    else:
+
+        print(
+            f"LBReset command error: {error}"
         )
 
     total=await db.pool.fetchval('SELECT COUNT(*) FROM users')
