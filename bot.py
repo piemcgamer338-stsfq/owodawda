@@ -279,6 +279,17 @@ class HelpSelect(discord.ui.Select):
             view=self.view
         )
 
+
+class HelpView(discord.ui.View):
+
+    def __init__(self):
+
+        super().__init__(timeout=180)
+
+        self.add_item(
+            HelpSelect()
+        )
+
 class RainView(discord.ui.View):
     def __init__(self, host_id, amount, seconds):
         super().__init__(timeout=seconds); self.host_id=host_id; self.amount=amount; self.entries=set()
