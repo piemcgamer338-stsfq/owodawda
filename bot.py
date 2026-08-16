@@ -3064,8 +3064,6 @@ async def coinflip(ctx, amount: str, choice: str = None):
         (
             f'**Choice:** {choice.title()}\n'
             f'**Landed:** {landed.title()}\n\n'
-            f'**Player Chance:** `40%`\n'
-            f'**House Chance:** `60%`\n\n'
             f'Public Hash: `{h}`\n'
             f'Server Seed: `{s}`\n'
             f'Client Seed: `{c}`'
