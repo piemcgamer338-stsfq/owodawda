@@ -2696,7 +2696,10 @@ class MinesView(discord.ui.View):
         self.message = None
         self.finished = False
 
-        # 5x5 = exactly 25 buttons
+        # ----------------------------------------------------
+        # 5 x 5 BOARD
+        # ----------------------------------------------------
+
         for i in range(25):
 
             button = discord.ui.Button(
@@ -2707,6 +2710,7 @@ class MinesView(discord.ui.View):
             )
 
             button.callback = self.pick
+
             self.add_item(button)
 
     # ========================================================
@@ -2738,7 +2742,7 @@ class MinesView(discord.ui.View):
         return multiplier.quantize(Decimal('0.01'))
 
     # ========================================================
-    # GRID TEXT
+    # BOARD TEXT
     # ========================================================
 
     def grid_text(self, reveal_all=False):
@@ -2773,36 +2777,36 @@ class MinesView(discord.ui.View):
         return '\n'.join(rows)
 
     # ========================================================
-    # GAME EMBED
+    # ACTIVE GAME EMBED
     # ========================================================
 
-    def game_embed(
-        self,
-        extra='Choose a tile to reveal a diamond.'
-    ):
+    def game_embed(self, extra=None):
 
-        mult = self.multiplier()
+        if extra is None:
+            extra = (
+                'Choose a tile to reveal a diamond.\n\n'
+                '💰 React with the money bag to cash out.'
+            )
+
+        multiplier = self.multiplier()
 
         profit = (
-            self.amount * (mult - Decimal('1'))
+            self.amount * (multiplier - Decimal('1'))
         ).quantize(Decimal('0.01'))
 
         return emb(
             '💣 Mines',
             (
                 f'**Bet Amount:** {money(self.amount)} points\n'
-                f'**Current Multiplier:** `{mult:.2f}×`\n'
-                f'**Profit:** `{money(profit)} points`\n\n'
+                f'**Current Multiplier:** `{multiplier:.2f}x`\n'
+                f'**Profit:** {money(profit)} points\n\n'
 
-                f'**Mines:** {self.bombs} {MINES_BOMB}\n'
-                f'**Diamonds:** {self.safe_tiles} {MINES_DIAMOND}\n'
-                f'**Revealed:** {self.revealed}/{self.safe_tiles}\n\n'
+                f'{self.bombs} {MINES_BOMB} | '
+                f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
                 f'{self.grid_text()}\n\n'
 
                 f'{extra}\n\n'
-
-                f'💰 React with the money bag to cash out.\n\n'
 
                 f'🔒 **Provably Fair**\n'
                 f'Public Hash: `{self.public_hash}`'
@@ -2810,7 +2814,7 @@ class MinesView(discord.ui.View):
         )
 
     # ========================================================
-    # PLAYER CHECK
+    # INTERACTION CHECK
     # ========================================================
 
     async def interaction_check(self, interaction):
@@ -2818,7 +2822,7 @@ class MinesView(discord.ui.View):
         if self.finished:
 
             await interaction.response.send_message(
-                '💥 This Mines game has already ended.',
+                '❌ This Mines game has already ended.',
                 ephemeral=True
             )
 
@@ -2827,7 +2831,7 @@ class MinesView(discord.ui.View):
         if interaction.user.id != self.author_id:
 
             await interaction.response.send_message(
-                'Only the player who started this Mines game can reveal tiles.',
+                '❌ Only the player who started this Mines game can play it.',
                 ephemeral=True
             )
 
@@ -2836,7 +2840,7 @@ class MinesView(discord.ui.View):
         return True
 
     # ========================================================
-    # REVEAL TILE
+    # TILE CLICK
     # ========================================================
 
     async def pick(self, interaction):
@@ -2844,16 +2848,9 @@ class MinesView(discord.ui.View):
         if self.finished:
 
             return await interaction.response.send_message(
-                '💥 This Mines game has already ended.',
+                '❌ This Mines game has already ended.',
                 ephemeral=True
             )
-
-        # IMPORTANT:
-        # Acknowledge the interaction immediately.
-        # This prevents "The application didn't respond in time"
-        # when the database takes a moment to respond.
-
-        await interaction.response.defer()
 
         try:
 
@@ -2872,17 +2869,25 @@ class MinesView(discord.ui.View):
             if button is None:
                 return
 
+            # Prevent clicking the same tile twice
+            if index in self.revealed_tiles:
+
+                return await interaction.response.send_message(
+                    '💎 You already revealed this tile.',
+                    ephemeral=True
+                )
+
             # ==================================================
-            # BOMB HIT
+            # BOMB
             # ==================================================
 
             if index in self.mines:
 
-                # Permanently end the game
+                # GAME IS PERMANENTLY OVER
                 self.finished = True
                 self.stop()
 
-                # Disable every tile
+                # Reveal entire board
                 for x in self.children:
 
                     x.disabled = True
@@ -2893,97 +2898,94 @@ class MinesView(discord.ui.View):
 
                     if tile_index in self.mines:
 
-                        x.label = '💣'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = discord.PartialEmoji.from_str('💣')
                         x.style = discord.ButtonStyle.danger
 
                     elif tile_index in self.revealed_tiles:
 
-                        x.label = '💎'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = discord.PartialEmoji.from_str('💎')
                         x.style = discord.ButtonStyle.success
 
                     else:
 
-                        x.label = ' '
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = discord.PartialEmoji.from_str('💎')
                         x.style = discord.ButtonStyle.secondary
 
-                # Record loss exactly once
-                await db.record(
-                    self.author_id,
-                    'Mines',
-                    self.amount,
-                    'loss',
-                    Decimal('0')
-                )
-
-                # Remove from active games
+                # Remove active game immediately
                 ACTIVE_MINES.pop(
                     interaction.message.id,
                     None
                 )
 
-                # Remove cashout reaction if possible
-                try:
-
-                    await interaction.message.clear_reaction(
-                        '💰',
-                        interaction.guild.me
-                    )
-
-                except Exception:
-                    pass
+                # ------------------------------------------------
+                # SEND DISCORD RESPONSE FIRST
+                # ------------------------------------------------
 
                 loss_embed = emb(
-                    '💣 Mines — You Lost',
+                    '❌ Game Over!',
                     (
-                        f'**Bet:** {money(self.amount)} points\n'
-                        f'**Diamonds Found:** {self.revealed}\n'
-                        f'**Last Multiplier:** '
-                        f'`{self.multiplier():.2f}×`\n\n'
+                        f'**Bet Amount:** {money(self.amount)} points\n'
+                        f'**Current Multiplier:** '
+                        f'`{self.multiplier():.2f}x`\n'
+                        f'**Profit:** 0 points\n\n'
 
-                        f'{self.grid_text(reveal_all=True)}\n\n'
+                        f'{self.bombs} {MINES_BOMB} | '
+                        f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
-                        f'💥 **You hit a mine!**\n'
-                        f'**This game has ended.**\n\n'
+                        f'💥 **You lost!**\n\n'
 
-                        f'🔒 **Provably Fair**\n'
-                        f'Public Hash: `{self.public_hash}`\n'
-                        f'Server Seed: `{self.server}`\n'
-                        f'Client Seed: `{self.client}`'
+                        f'🔒 **Provably Fair:**\n'
+                        f'• **Public Hash:** `{self.public_hash}`\n'
+                        f'• **Server Seed:** `{self.server}`\n'
+                        f'• **Client Seed:** `{self.client}`'
                     ),
                     RED
                 )
 
-                return await interaction.edit_original_response(
+                # THIS RESPONDS IMMEDIATELY.
+                # No defer and no database call before it.
+                await interaction.response.edit_message(
                     embed=loss_embed,
                     view=self
                 )
+
+                # ------------------------------------------------
+                # DATABASE AFTER DISCORD RESPONSE
+                # ------------------------------------------------
+
+                try:
+
+                    await db.record(
+                        self.author_id,
+                        'Mines',
+                        self.amount,
+                        'loss',
+                        Decimal('0')
+                    )
+
+                except Exception as e:
+
+                    print(f'Mines loss DB error: {e}')
+
+                return
 
             # ==================================================
             # DIAMOND
             # ==================================================
 
-            if index in self.revealed_tiles:
-
-                return await interaction.edit_original_response(
-                    embed=self.game_embed(
-                        'That diamond has already been revealed.'
-                    ),
-                    view=self
-                )
-
             self.revealed += 1
             self.revealed_tiles.add(index)
 
             button.disabled = True
-            button.label = '💎'
-            button.emoji = None
+            button.label = ''
+            button.emoji = discord.PartialEmoji.from_str('💎')
             button.style = discord.ButtonStyle.success
 
             # ==================================================
-            # ALL SAFE TILES
+            # ALL DIAMONDS FOUND
             # ==================================================
 
             if self.revealed >= self.safe_tiles:
@@ -2997,20 +2999,12 @@ class MinesView(discord.ui.View):
                     self.amount * multiplier
                 ).quantize(Decimal('0.01'))
 
-                await db.record(
-                    self.author_id,
-                    'Mines',
-                    self.amount,
-                    'win',
-                    payout
-                )
-
                 ACTIVE_MINES.pop(
                     interaction.message.id,
                     None
                 )
 
-                # Disable every button
+                # Reveal whole board
                 for x in self.children:
 
                     x.disabled = True
@@ -3021,61 +3015,70 @@ class MinesView(discord.ui.View):
 
                     if tile_index in self.mines:
 
-                        x.label = '💣'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = discord.PartialEmoji.from_str('💣')
                         x.style = discord.ButtonStyle.danger
 
                     else:
 
-                        x.label = '💎'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = discord.PartialEmoji.from_str('💎')
                         x.style = discord.ButtonStyle.success
 
-                # Remove cashout reaction
-                try:
-
-                    await interaction.message.clear_reaction(
-                        '💰',
-                        interaction.guild.me
-                    )
-
-                except Exception:
-                    pass
-
-                win_embed = result_embed(
-                    'Mines',
-                    self.amount,
-                    True,
-                    multiplier,
+                win_embed = emb(
+                    '🎉 Game Won!',
                     (
-                        f'💎 You revealed all '
-                        f'**{self.safe_tiles} diamonds**!\n\n'
+                        f'**Bet Amount:** {money(self.amount)} points\n'
+                        f'**Current Multiplier:** `{multiplier:.2f}x`\n'
+                        f'**Payout:** {money(payout)} points\n\n'
 
-                        f'{self.grid_text(reveal_all=True)}\n\n'
+                        f'{self.bombs} {MINES_BOMB} | '
+                        f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
-                        f'**Multiplier:** `{multiplier:.2f}×`\n'
-                        f'**Payout:** `{money(payout)} points`\n\n'
+                        f'💎 **All diamonds found!**\n\n'
 
-                        f'🔒 **Public Hash:** `{self.public_hash}`\n'
-                        f'**Server Seed:** `{self.server}`\n'
-                        f'**Client Seed:** `{self.client}`'
+                        f'🔒 **Provably Fair:**\n'
+                        f'• **Public Hash:** `{self.public_hash}`\n'
+                        f'• **Server Seed:** `{self.server}`\n'
+                        f'• **Client Seed:** `{self.client}`'
                     )
                 )
 
-                return await interaction.edit_original_response(
+                # RESPOND FIRST
+                await interaction.response.edit_message(
                     embed=win_embed,
                     view=self
                 )
 
+                # DATABASE AFTER
+                try:
+
+                    await db.record(
+                        self.author_id,
+                        'Mines',
+                        self.amount,
+                        'win',
+                        payout
+                    )
+
+                except Exception as e:
+
+                    print(f'Mines win DB error: {e}')
+
+                return
+
             # ==================================================
-            # CONTINUE GAME
+            # CONTINUE
             # ==================================================
 
-            await interaction.edit_original_response(
+            multiplier = self.multiplier()
+
+            # Respond immediately
+            await interaction.response.edit_message(
                 embed=self.game_embed(
-                    f'{MINES_DIAMOND} **Diamond found!**\n'
+                    f'💎 **Diamond found!**\n'
                     f'You can cash out at '
-                    f'`{self.multiplier():.2f}×` using 💰.'
+                    f'`{multiplier:.2f}x` using 💰.'
                 ),
                 view=self
             )
@@ -3084,21 +3087,18 @@ class MinesView(discord.ui.View):
 
             print(f'Mines interaction error: {e}')
 
-            try:
+            # Only send a response if Discord has not received one
+            if not interaction.response.is_done():
 
-                await interaction.edit_original_response(
-                    embed=emb(
-                        'Mines Error',
-                        'Something went wrong while processing this tile. '
-                        'Your game was not intentionally ended.',
-                        RED
-                    ),
-                    view=self
-                )
+                try:
 
-            except Exception:
+                    await interaction.response.send_message(
+                        '❌ An error occurred while processing that tile.',
+                        ephemeral=True
+                    )
 
-                pass
+                except Exception:
+                    pass
 
     # ========================================================
     # TIMEOUT
@@ -3112,21 +3112,21 @@ class MinesView(discord.ui.View):
         self.finished = True
         self.stop()
 
-        # Disable all buttons
+        ACTIVE_MINES.pop(
+            self.message.id if self.message else 0,
+            None
+        )
+
+        # Disable board
         for x in self.children:
             x.disabled = True
 
-        # Remove from active games
-        if self.message:
+        if not self.message:
+            return
 
-            ACTIVE_MINES.pop(
-                self.message.id,
-                None
-            )
-
-        # ====================================================
-        # AUTO CASHOUT AFTER DIAMOND
-        # ====================================================
+        # ----------------------------------------------------
+        # AUTO CASHOUT
+        # ----------------------------------------------------
 
         if self.revealed > 0:
 
@@ -3136,76 +3136,79 @@ class MinesView(discord.ui.View):
                 self.amount * multiplier
             ).quantize(Decimal('0.01'))
 
-            await db.record(
-                self.author_id,
-                'Mines',
-                self.amount,
-                'win',
-                payout
+            timeout_embed = emb(
+                '⏰ Game Over!',
+                (
+                    f'**Bet Amount:** {money(self.amount)} points\n'
+                    f'**Current Multiplier:** `{multiplier:.2f}x`\n'
+                    f'**Payout:** {money(payout)} points\n\n'
+
+                    f'💎 Automatically cashed out after '
+                    f'**{self.revealed} diamonds**.\n\n'
+
+                    f'🔒 **Provably Fair:**\n'
+                    f'• **Public Hash:** `{self.public_hash}`\n'
+                    f'• **Server Seed:** `{self.server}`\n'
+                    f'• **Client Seed:** `{self.client}`'
+                )
             )
 
-            if self.message:
-
-                try:
-
-                    await self.message.clear_reaction(
-                        '💰',
-                        self.message.guild.me
-                    )
-
-                except Exception:
-                    pass
-
-                await self.message.edit(
-                    embed=result_embed(
-                        'Mines',
-                        self.amount,
-                        True,
-                        multiplier,
-                        (
-                            f'Automatically cashed out after '
-                            f'**{self.revealed} diamonds**.\n\n'
-                            f'Final multiplier: '
-                            f'**{multiplier:.2f}×**'
-                        )
-                    ),
-                    view=self
-                )
-
-        # ====================================================
-        # NO DIAMOND = LOSS
-        # ====================================================
-
-        elif self.message:
-
-            await db.record(
-                self.author_id,
-                'Mines',
-                self.amount,
-                'loss',
-                Decimal('0')
+            await self.message.edit(
+                embed=timeout_embed,
+                view=self
             )
 
             try:
 
-                await self.message.clear_reaction(
-                    '💰',
-                    self.message.guild.me
-                )
-
-            except Exception:
-                pass
-
-            await self.message.edit(
-                embed=result_embed(
+                await db.record(
+                    self.author_id,
                     'Mines',
                     self.amount,
-                    False,
-                    Decimal('0'),
-                    'No diamond was revealed before the game timed out.'
+                    'win',
+                    payout
+                )
+
+            except Exception as e:
+
+                print(f'Mines timeout DB error: {e}')
+
+        # ----------------------------------------------------
+        # NO DIAMOND
+        # ----------------------------------------------------
+
+        else:
+
+            timeout_embed = emb(
+                '⏰ Game Over!',
+                (
+                    f'**Bet Amount:** {money(self.amount)} points\n'
+                    f'**Current Multiplier:** `1.00x`\n'
+                    f'**Profit:** 0 points\n\n'
+
+                    f'❌ No diamond was revealed before the game '
+                    f'timed out.'
                 ),
+                RED
+            )
+
+            await self.message.edit(
+                embed=timeout_embed,
                 view=self
             )
+
+            try:
+
+                await db.record(
+                    self.author_id,
+                    'Mines',
+                    self.amount,
+                    'loss',
+                    Decimal('0')
+                )
+
+            except Exception as e:
+
+                print(f'Mines timeout DB error: {e}')
 
 
 # ============================================================
@@ -3248,8 +3251,7 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
 
     ACTIVE_MINES[message.id] = view
 
-    # 💰 reaction = cashout
-    # This is NOT a button.
+    # 💰 = cashout reaction
     await message.add_reaction('💰')
 @bot.command()
 async def rps(ctx, member: discord.Member, amount: Decimal):
