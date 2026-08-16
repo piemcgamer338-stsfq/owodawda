@@ -1989,7 +1989,9 @@ async def withdraw(ctx, points: str, address: str):
 
     try:
         amount = Decimal(points).quantize(Decimal("0.01"))
+
     except (InvalidOperation, ValueError):
+
         return await ctx.send(
             embed=emb(
                 "Invalid Amount",
@@ -2001,6 +2003,7 @@ async def withdraw(ctx, points: str, address: str):
         )
 
     if amount <= 0:
+
         return await ctx.send(
             embed=emb(
                 "Invalid Amount",
@@ -2016,6 +2019,7 @@ async def withdraw(ctx, points: str, address: str):
     address = address.strip()
 
     if not valid_ltc_address(address):
+
         return await ctx.send(
             embed=emb(
                 "Invalid Litecoin Address",
@@ -2032,6 +2036,7 @@ async def withdraw(ctx, points: str, address: str):
     balance = Decimal(str(u["balance"]))
 
     if balance < amount:
+
         return await ctx.send(
             embed=emb(
                 "Insufficient Balance",
@@ -2060,16 +2065,25 @@ async def withdraw(ctx, points: str, address: str):
     class WithdrawalView(discord.ui.View):
 
         def __init__(self):
+
             super().__init__(timeout=300)
+
             self.finished = False
+
+        # ====================================================
+        # INTERACTION CHECK
+        # ====================================================
 
         async def interaction_check(self, interaction):
 
             if interaction.user.id != ctx.author.id:
+
                 await interaction.response.send_message(
-                    "❌ Only the user who requested this withdrawal can use these buttons.",
+                    "❌ Only the user who requested this withdrawal "
+                    "can use these buttons.",
                     ephemeral=True
                 )
+
                 return False
 
             return True
@@ -2116,7 +2130,8 @@ async def withdraw(ctx, points: str, address: str):
                 return await interaction.response.edit_message(
                     embed=emb(
                         "Withdrawal Failed",
-                        "You no longer have enough points for this withdrawal.",
+                        "You no longer have enough points "
+                        "for this withdrawal.",
                         RED
                     ),
                     view=self
@@ -2127,6 +2142,7 @@ async def withdraw(ctx, points: str, address: str):
             # ------------------------------------------------
 
             try:
+
                 await db.pool.execute(
                     """
                     INSERT INTO withdrawals
@@ -2138,7 +2154,9 @@ async def withdraw(ctx, points: str, address: str):
                     amount,
                     ltc_amount
                 )
+
             except Exception as e:
+
                 print(f"Withdrawal DB error: {e}")
 
             # ------------------------------------------------
@@ -2185,6 +2203,7 @@ async def withdraw(ctx, points: str, address: str):
             # ------------------------------------------------
 
             try:
+
                 dm = discord.Embed(
                     title="💰 Withdrawal Successful!",
                     description=(
@@ -2205,10 +2224,11 @@ async def withdraw(ctx, points: str, address: str):
                 await ctx.author.send(embed=dm)
 
             except discord.Forbidden:
+
                 pass
 
             # ------------------------------------------------
-            # AUTOMATIC LOG
+            # AUTOMATIC WITHDRAWAL LOG
             # ------------------------------------------------
 
             if WITHDRAWAL_LOG_CHANNEL:
@@ -2219,97 +2239,35 @@ async def withdraw(ctx, points: str, address: str):
 
                 if channel:
 
-                    guild_name = (
-                        ctx.guild.name
-                        if ctx.guild
-                        else "Direct Message"
-                    )
-
-                    guild_id = (
-                        str(ctx.guild.id)
-                        if ctx.guild
-                        else "N/A"
-                    )
-
-                    channel_name = (
-                        ctx.channel.mention
-                        if hasattr(ctx.channel, "mention")
-                        else str(ctx.channel)
-                    )
-
-                    jump_url = (
-                        ctx.message.jump_url
-                        if hasattr(ctx.message, "jump_url")
-                        else "Unavailable"
-                    )
+                    username = ctx.author.display_name
 
                     log = discord.Embed(
-                        title="💰 Withdrawal Approved",
+                        title="💰 LiteBet Withdrawal 💰",
+                        description=(
+                            f"🎉 **{username}** has successfully "
+                            f"withdrawn **{money(amount)} points** "
+                            f"for **{ltc_amount:.8f} LTC**!\n\n"
+                            f"🔗 **ID:** `{txid}`"
+                        ),
                         color=GREEN,
                         timestamp=datetime.now(timezone.utc)
                     )
 
-                    log.add_field(
-                        name="User",
-                        value=(
-                            f"{ctx.author.mention}\n"
-                            f"`{ctx.author.id}`"
-                        ),
-                        inline=True
-                    )
-
-                    log.add_field(
-                        name="Amount",
-                        value=(
-                            f"**{money(amount)} points**\n"
-                            f"`{ltc_amount:.8f} LTC`"
-                        ),
-                        inline=True
-                    )
-
-                    log.add_field(
-                        name="Litecoin Address",
-                        value=f"`{address}`",
-                        inline=False
-                    )
-
-                    log.add_field(
-                        name="Transaction ID",
-                        value=f"`{txid}`",
-                        inline=False
-                    )
-
-                    log.add_field(
-                        name="Request Location",
-                        value=(
-                            f"Server: **{guild_name}**\n"
-                            f"Server ID: `{guild_id}`\n"
-                            f"Channel: {channel_name}\n"
-                            f"[Jump to request]({jump_url})"
-                        ),
-                        inline=False
-                    )
-
-                    log.add_field(
-                        name="Request ID",
-                        value=f"`{request_id}`",
-                        inline=True
-                    )
-
-                    log.add_field(
-                        name="Status",
-                        value="✅ Approved",
-                        inline=True
-                    )
-
                     log.set_footer(
-                        text="LiteBet • Automatic Withdrawal Log"
+                        text="LiteBet"
                     )
 
                     try:
-                        await channel.send(embed=log)
+
+                        await channel.send(
+                            embed=log
+                        )
+
                     except Exception as e:
-                        print(f"Withdrawal log error: {e}")
+
+                        print(
+                            f"Withdrawal log error: {e}"
+                        )
 
         # ====================================================
         # DECLINE
@@ -2327,6 +2285,10 @@ async def withdraw(ctx, points: str, address: str):
 
             self.finished = True
 
+            # ------------------------------------------------
+            # DISABLE BUTTONS
+            # ------------------------------------------------
+
             for child in self.children:
                 child.disabled = True
 
@@ -2335,6 +2297,7 @@ async def withdraw(ctx, points: str, address: str):
             # ------------------------------------------------
 
             try:
+
                 await db.pool.execute(
                     """
                     INSERT INTO withdrawals
@@ -2346,8 +2309,12 @@ async def withdraw(ctx, points: str, address: str):
                     amount,
                     ltc_amount
                 )
+
             except Exception as e:
-                print(f"Declined withdrawal DB error: {e}")
+
+                print(
+                    f"Declined withdrawal DB error: {e}"
+                )
 
             # ------------------------------------------------
             # DECLINED MESSAGE
@@ -2376,7 +2343,7 @@ async def withdraw(ctx, points: str, address: str):
             )
 
             # ------------------------------------------------
-            # AUTOMATIC LOG
+            # AUTOMATIC DECLINE LOG
             # ------------------------------------------------
 
             if WITHDRAWAL_LOG_CHANNEL:
@@ -2387,84 +2354,35 @@ async def withdraw(ctx, points: str, address: str):
 
                 if channel:
 
-                    guild_name = (
-                        ctx.guild.name
-                        if ctx.guild
-                        else "Direct Message"
-                    )
-
-                    channel_name = (
-                        ctx.channel.mention
-                        if hasattr(ctx.channel, "mention")
-                        else str(ctx.channel)
-                    )
-
-                    jump_url = (
-                        ctx.message.jump_url
-                        if hasattr(ctx.message, "jump_url")
-                        else "Unavailable"
-                    )
+                    username = ctx.author.display_name
 
                     log = discord.Embed(
-                        title="❌ Withdrawal Declined",
+                        title="❌ LiteBet Withdrawal ❌",
+                        description=(
+                            f"🎉 **{username}** declined "
+                            f"a withdrawal of **{money(amount)} points** "
+                            f"for **{ltc_amount:.8f} LTC**.\n\n"
+                            f"🔗 **ID:** `{request_id}`"
+                        ),
                         color=RED,
                         timestamp=datetime.now(timezone.utc)
                     )
 
-                    log.add_field(
-                        name="User",
-                        value=(
-                            f"{ctx.author.mention}\n"
-                            f"`{ctx.author.id}`"
-                        ),
-                        inline=True
-                    )
-
-                    log.add_field(
-                        name="Amount",
-                        value=(
-                            f"**{money(amount)} points**\n"
-                            f"`{ltc_amount:.8f} LTC`"
-                        ),
-                        inline=True
-                    )
-
-                    log.add_field(
-                        name="Litecoin Address",
-                        value=f"`{address}`",
-                        inline=False
-                    )
-
-                    log.add_field(
-                        name="Request Location",
-                        value=(
-                            f"Server: **{guild_name}**\n"
-                            f"Channel: {channel_name}\n"
-                            f"[Jump to request]({jump_url})"
-                        ),
-                        inline=False
-                    )
-
-                    log.add_field(
-                        name="Request ID",
-                        value=f"`{request_id}`",
-                        inline=True
-                    )
-
-                    log.add_field(
-                        name="Status",
-                        value="❌ Declined",
-                        inline=True
-                    )
-
                     log.set_footer(
-                        text="LiteBet • Automatic Withdrawal Log"
+                        text="LiteBet"
                     )
 
                     try:
-                        await channel.send(embed=log)
+
+                        await channel.send(
+                            embed=log
+                        )
+
                     except Exception as e:
-                        print(f"Withdrawal log error: {e}")
+
+                        print(
+                            f"Withdrawal decline log error: {e}"
+                        )
 
         # ====================================================
         # TIMEOUT
@@ -2481,6 +2399,7 @@ async def withdraw(ctx, points: str, address: str):
                 child.disabled = True
 
             try:
+
                 await message.edit(
                     embed=emb(
                         "Withdrawal Expired",
@@ -2490,7 +2409,9 @@ async def withdraw(ctx, points: str, address: str):
                     ),
                     view=self
                 )
+
             except Exception:
+
                 pass
 
     # ========================================================
@@ -2516,7 +2437,8 @@ async def withdraw(ctx, points: str, address: str):
         name="Request Location",
         value=(
             f"Server: **{ctx.guild.name if ctx.guild else 'DM'}**\n"
-            f"Channel: {ctx.channel.mention if hasattr(ctx.channel, 'mention') else ctx.channel}"
+            f"Channel: "
+            f"{ctx.channel.mention if hasattr(ctx.channel, 'mention') else ctx.channel}"
         ),
         inline=False
     )
@@ -2535,126 +2457,6 @@ async def withdraw(ctx, points: str, address: str):
         embed=confirmation,
         view=view
     )
-
-@bot.command()
-async def stats(ctx, member: discord.Member=None):
-    member=member or ctx.author; u=await db.user(member.id)
-    if member!=ctx.author and u['privacy']: return await ctx.send(embed=emb('Private account','This profile is private.',RED))
-    await ctx.send(embed=emb(f'{member.display_name} — Stats',f'📤 Withdrawals: **{money(u["withdrawals"])} points**\n🏆 Won: **{u["games_won"]} games**\n💸 Bonus received: **{money(u["bonuses"])} points**\n🎮 Last 7 Days Wagered: **{money(u["weekly_wager"])} points**\n🎮 Total Played: **{u["games_played"]} games** and wagered **{money(u["wagered"])} points**\n\n📤 Tips sent: **{money(u["tips_sent"])} points**\n📥 Tips received: **{money(u["tips_received"])} points**'))
-@bot.command()
-async def rank(ctx, member: discord.Member=None):
-    member=member or ctx.author; u=await db.user(member.id); levels=[('Bronze Gambler',100,2),('Silver Spinner',1000,5),('Gold Grinder',2500,10),('Platinum Player',5000,20),('Diamond Deen',10000,40),('Ruby Roller',25000,80),('Emerald Highroller',50000,160),('Sapphire Shark',100000,320)]
-    current=next((x for x in reversed(levels) if Decimal(u['wagered'])>=x[1]),('Unranked',0,0)); nxt=next((x for x in levels if Decimal(u['wagered'])<x[1]),None)
-    await ctx.send(embed=emb('Gambling Rank',f'**Current Rank:** {current[0]}\n**Total Wagered:** {money(u["wagered"])} points\n'+(f'**Next rank:** {nxt[0]} in **{money(Decimal(nxt[1])-Decimal(u["wagered"]))}** wager' if nxt else '**Highest rank achieved!**')))
-@bot.command()
-async def ranks(ctx): await ctx.send(embed=emb('LiteBet Ranks','Bronze Gambler — 100 wager — 2 bonus\nSilver Spinner — 1K wager — 5 bonus\nGold Grinder — 2.5K wager — 10 bonus\nPlatinum Player — 5K wager — 20 bonus\nDiamond Deen — 10K wager — 40 bonus\nRuby Roller — 25K wager — 80 bonus\nEmerald Highroller — 50K wager — 160 bonus\nSapphire Shark — 100K wager — 320 bonus'))
-@bot.command()
-async def vip(ctx, member: discord.Member=None):
-    member=member or ctx.author; u=await db.user(member.id); await ctx.send(embed=emb('VIP Progress',f'**{member.display_name}** has wagered **{money(u["wagered"])} / 10,000** points for VIP access.'))
-@bot.command(aliases=['addy'])
-async def address(ctx, ltc_address: str):
-    if len(ltc_address)<20: return await ctx.send(embed=emb('Invalid Litecoin address','Please provide a valid Litecoin address.',RED))
-    await ctx.send(embed=emb('LTC Address Balance',f'**Address:** `{ltc_address}`\n**Balance:** External explorer lookup is configured through `LTC_EXPLORER_URL`.'))
-@bot.command(aliases=['depo'])
-async def deposit(ctx):
-    xpub = os.getenv('LTC_XPUB')
-
-    if not xpub:
-        return await ctx.send(
-            embed=emb(
-                'Deposit unavailable',
-                'The owner has not configured `LTC_XPUB` yet.',
-                RED
-            )
-        )
-
-    try:
-        # Get user / create user if needed
-        u = await db.user(ctx.author.id)
-
-        # Get the next unused deposit index
-        index = int(u['deposit_index'])
-
-        # Derive Litecoin address from the account XPUB
-        wallet = Bip44.FromExtendedKey(
-            xpub,
-            Bip44Coins.LITECOIN
-        )
-
-        address = (
-            wallet
-            .Change(Bip44Changes.CHAIN_EXT)
-            .AddressIndex(index)
-            .PublicKey()
-            .ToAddress()
-        )
-
-        # Move to the next index so the next user gets a new address
-        await db.pool.execute(
-            """
-            UPDATE users
-            SET deposit_index = deposit_index + 1,
-                deposit_address = $2
-            WHERE user_id = $1
-            """,
-            ctx.author.id,
-            address
-        )
-
-        # DM the user
-        dm_embed = discord.Embed(
-            title='Your Litecoin Deposit Address',
-            description=(
-                f'Please send **Litecoin (LTC)** only to the address below.\n\n'
-                f'`{address}`\n\n'
-                f'**Network:** Litecoin Mainnet\n'
-                f'**Currency:** LTC\n\n'
-                f'Your deposit will be credited after the required confirmations.'
-            ),
-            color=GREEN
-        )
-
-        dm_embed.set_footer(text='LiteBet • Litecoin Deposits')
-
-        try:
-            await ctx.author.send(embed=dm_embed)
-
-            await ctx.send(
-                embed=emb(
-                    'Deposit Address Sent',
-                    'I have sent your **Litecoin (LTC)** deposit address to your DMs.',
-                    GREEN
-                )
-            )
-
-        except discord.Forbidden:
-            # DMs disabled
-            channel_embed = discord.Embed(
-                title='Litecoin Deposit Address',
-                description=(
-                    f'Your DMs are closed, so I could not send the address privately.\n\n'
-                    f'**Your address:**\n'
-                    f'`{address}`\n\n'
-                    f'**Network:** Litecoin Mainnet\n'
-                    f'**Currency:** LTC\n\n'
-                    f'Your deposit will be credited after the required confirmations.'
-                ),
-                color=GREEN
-            )
-
-            await ctx.send(embed=channel_embed)
-
-    except Exception as e:
-        print(f'Deposit error for {ctx.author.id}: {e}')
-
-        await ctx.send(
-            embed=emb(
-                'Deposit Error',
-                'I could not generate your Litecoin deposit address. Please try again.',
-                RED
-            )
-        )
-        
 @bot.command()
 async def worldtime(ctx):
     now=datetime.now(timezone.utc); await ctx.send(embed=emb('🌍 World Time',f'UTC: <t:{int(now.timestamp())}:F>\nIndia: <t:{int(now.timestamp())}:F>\nUse Discord’s local rendering to see the exact time in your timezone.'))
@@ -2784,7 +2586,15 @@ MINES_BOMB = '<:bomb:1538364767201271808>'
 
 class MinesView(discord.ui.View):
 
-    def __init__(self, author_id, amount, bombs, server, client, public_hash):
+    def __init__(
+        self,
+        author_id,
+        amount,
+        bombs,
+        server,
+        client,
+        public_hash
+    ):
         super().__init__(timeout=120)
 
         self.author_id = author_id
@@ -2792,7 +2602,10 @@ class MinesView(discord.ui.View):
         self.bombs = bombs
         self.safe_tiles = 25 - bombs
 
-        self.mines = set(random.sample(range(25), bombs))
+        self.mines = set(
+            random.sample(range(25), bombs)
+        )
+
         self.revealed_tiles = set()
         self.revealed = 0
 
@@ -2846,7 +2659,9 @@ class MinesView(discord.ui.View):
 
             multiplier *= step
 
-        return multiplier.quantize(Decimal('0.01'))
+        return multiplier.quantize(
+            Decimal('0.01')
+        )
 
     # ========================================================
     # BOARD TEXT
@@ -2868,6 +2683,7 @@ class MinesView(discord.ui.View):
 
                     if index in self.mines:
                         cells.append(MINES_BOMB)
+
                     else:
                         cells.append(MINES_DIAMOND)
 
@@ -2890,6 +2706,7 @@ class MinesView(discord.ui.View):
     def game_embed(self, extra=None):
 
         if extra is None:
+
             extra = (
                 'Choose a tile to reveal a diamond.\n\n'
                 '💰 React with the money bag to cash out.'
@@ -2898,15 +2715,21 @@ class MinesView(discord.ui.View):
         multiplier = self.multiplier()
 
         profit = (
-            self.amount * (multiplier - Decimal('1'))
+            self.amount
+            * (multiplier - Decimal('1'))
         ).quantize(Decimal('0.01'))
 
         return emb(
             '💣 Mines',
             (
-                f'**Bet Amount:** {money(self.amount)} points\n'
-                f'**Current Multiplier:** `{multiplier:.2f}x`\n'
-                f'**Profit:** {money(profit)} points\n\n'
+                f'**Bet Amount:** '
+                f'{money(self.amount)} points\n'
+
+                f'**Current Multiplier:** '
+                f'`{multiplier:.2f}x`\n'
+
+                f'**Profit:** '
+                f'{money(profit)} points\n\n'
 
                 f'{self.bombs} {MINES_BOMB} | '
                 f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
@@ -2921,7 +2744,7 @@ class MinesView(discord.ui.View):
         )
 
     # ========================================================
-    # INTERACTION CHECK
+    # PLAYER CHECK
     # ========================================================
 
     async def interaction_check(self, interaction):
@@ -2938,7 +2761,8 @@ class MinesView(discord.ui.View):
         if interaction.user.id != self.author_id:
 
             await interaction.response.send_message(
-                '❌ Only the player who started this Mines game can play it.',
+                '❌ Only the player who started this Mines '
+                'game can play it.',
                 ephemeral=True
             )
 
@@ -2976,7 +2800,10 @@ class MinesView(discord.ui.View):
             if button is None:
                 return
 
-            # Prevent clicking the same tile twice
+            # ------------------------------------------------
+            # PREVENT DUPLICATE TILE
+            # ------------------------------------------------
+
             if index in self.revealed_tiles:
 
                 return await interaction.response.send_message(
@@ -2984,17 +2811,26 @@ class MinesView(discord.ui.View):
                     ephemeral=True
                 )
 
-            # ==================================================
+            # =================================================
             # BOMB
-            # ==================================================
+            # =================================================
 
             if index in self.mines:
 
-                # GAME IS PERMANENTLY OVER
+                # Permanently end game
                 self.finished = True
                 self.stop()
 
-                # Reveal entire board
+                # Remove from active games immediately
+                ACTIVE_MINES.pop(
+                    interaction.message.id,
+                    None
+                )
+
+                # ------------------------------------------------
+                # REVEAL ENTIRE BOARD
+                # ------------------------------------------------
+
                 for x in self.children:
 
                     x.disabled = True
@@ -3005,62 +2841,67 @@ class MinesView(discord.ui.View):
 
                     if tile_index in self.mines:
 
-                        x.label = ''
-                        x.emoji = discord.PartialEmoji.from_str('💣')
+                        x.label = 'BOMB'
+                        x.emoji = None
                         x.style = discord.ButtonStyle.danger
 
                     elif tile_index in self.revealed_tiles:
 
-                        x.label = ''
-                        x.emoji = discord.PartialEmoji.from_str('💎')
+                        x.label = 'GEM'
+                        x.emoji = None
                         x.style = discord.ButtonStyle.success
 
                     else:
 
                         x.label = ''
-                        x.emoji = discord.PartialEmoji.from_str('💎')
+                        x.emoji = None
                         x.style = discord.ButtonStyle.secondary
 
-                # Remove active game immediately
-                ACTIVE_MINES.pop(
-                    interaction.message.id,
-                    None
-                )
-
                 # ------------------------------------------------
-                # SEND DISCORD RESPONSE FIRST
+                # LOSS EMBED
                 # ------------------------------------------------
 
                 loss_embed = emb(
                     '❌ Game Over!',
                     (
-                        f'**Bet Amount:** {money(self.amount)} points\n'
+                        f'**Bet Amount:** '
+                        f'{money(self.amount)} points\n'
+
                         f'**Current Multiplier:** '
                         f'`{self.multiplier():.2f}x`\n'
+
                         f'**Profit:** 0 points\n\n'
 
                         f'{self.bombs} {MINES_BOMB} | '
                         f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
-                        f'💥 **You lost!**\n\n'
+                        f'💥 **You lost!**\n'
+                        f'You hit a mine.\n\n'
 
                         f'🔒 **Provably Fair:**\n'
-                        f'• **Public Hash:** `{self.public_hash}`\n'
-                        f'• **Server Seed:** `{self.server}`\n'
-                        f'• **Client Seed:** `{self.client}`'
+                        f'• **Public Hash:** '
+                        f'`{self.public_hash}`\n'
+
+                        f'• **Server Seed:** '
+                        f'`{self.server}`\n'
+
+                        f'• **Client Seed:** '
+                        f'`{self.client}`'
                     ),
                     RED
                 )
 
-                # THIS RESPONDS IMMEDIATELY.
-                # No defer and no database call before it.
+                # ------------------------------------------------
+                # RESPOND TO DISCORD FIRST
+                # ------------------------------------------------
+
                 await interaction.response.edit_message(
                     embed=loss_embed,
                     view=self
                 )
 
                 # ------------------------------------------------
-                # DATABASE AFTER DISCORD RESPONSE
+                # DATABASE AFTER RESPONSE
                 # ------------------------------------------------
 
                 try:
@@ -3075,25 +2916,28 @@ class MinesView(discord.ui.View):
 
                 except Exception as e:
 
-                    print(f'Mines loss DB error: {e}')
+                    print(
+                        f'Mines loss DB error: {e}'
+                    )
 
                 return
 
-            # ==================================================
+            # =================================================
             # DIAMOND
-            # ==================================================
+            # =================================================
 
             self.revealed += 1
+
             self.revealed_tiles.add(index)
 
             button.disabled = True
-            button.label = ''
-            button.emoji = discord.PartialEmoji.from_str('💎')
+            button.label = 'GEM'
+            button.emoji = None
             button.style = discord.ButtonStyle.success
 
-            # ==================================================
-            # ALL DIAMONDS FOUND
-            # ==================================================
+            # =================================================
+            # ALL SAFE TILES
+            # =================================================
 
             if self.revealed >= self.safe_tiles:
 
@@ -3111,7 +2955,10 @@ class MinesView(discord.ui.View):
                     None
                 )
 
-                # Reveal whole board
+                # ------------------------------------------------
+                # REVEAL ENTIRE BOARD
+                # ------------------------------------------------
+
                 for x in self.children:
 
                     x.disabled = True
@@ -3122,22 +2969,31 @@ class MinesView(discord.ui.View):
 
                     if tile_index in self.mines:
 
-                        x.label = ''
-                        x.emoji = discord.PartialEmoji.from_str('💣')
+                        x.label = 'BOMB'
+                        x.emoji = None
                         x.style = discord.ButtonStyle.danger
 
                     else:
 
-                        x.label = ''
-                        x.emoji = discord.PartialEmoji.from_str('💎')
+                        x.label = 'GEM'
+                        x.emoji = None
                         x.style = discord.ButtonStyle.success
+
+                # ------------------------------------------------
+                # WIN EMBED
+                # ------------------------------------------------
 
                 win_embed = emb(
                     '🎉 Game Won!',
                     (
-                        f'**Bet Amount:** {money(self.amount)} points\n'
-                        f'**Current Multiplier:** `{multiplier:.2f}x`\n'
-                        f'**Payout:** {money(payout)} points\n\n'
+                        f'**Bet Amount:** '
+                        f'{money(self.amount)} points\n'
+
+                        f'**Current Multiplier:** '
+                        f'`{multiplier:.2f}x`\n'
+
+                        f'**Payout:** '
+                        f'{money(payout)} points\n\n'
 
                         f'{self.bombs} {MINES_BOMB} | '
                         f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
@@ -3145,19 +3001,25 @@ class MinesView(discord.ui.View):
                         f'💎 **All diamonds found!**\n\n'
 
                         f'🔒 **Provably Fair:**\n'
-                        f'• **Public Hash:** `{self.public_hash}`\n'
-                        f'• **Server Seed:** `{self.server}`\n'
-                        f'• **Client Seed:** `{self.client}`'
-                    )
+                        f'• **Public Hash:** '
+                        f'`{self.public_hash}`\n'
+
+                        f'• **Server Seed:** '
+                        f'`{self.server}`\n'
+
+                        f'• **Client Seed:** '
+                        f'`{self.client}`'
+                    ),
+                    GREEN
                 )
 
-                # RESPOND FIRST
+                # Respond FIRST
                 await interaction.response.edit_message(
                     embed=win_embed,
                     view=self
                 )
 
-                # DATABASE AFTER
+                # Database AFTER response
                 try:
 
                     await db.record(
@@ -3170,42 +3032,193 @@ class MinesView(discord.ui.View):
 
                 except Exception as e:
 
-                    print(f'Mines win DB error: {e}')
+                    print(
+                        f'Mines win DB error: {e}'
+                    )
 
                 return
 
-            # ==================================================
+            # =================================================
             # CONTINUE
-            # ==================================================
+            # =================================================
 
             multiplier = self.multiplier()
 
-            # Respond immediately
             await interaction.response.edit_message(
                 embed=self.game_embed(
-                    f'💎 **Diamond found!**\n'
-                    f'You can cash out at '
-                    f'`{multiplier:.2f}x` using 💰.'
+                    (
+                        f'💎 **Diamond found!**\n'
+                        f'You can cash out at '
+                        f'`{multiplier:.2f}x` using 💰.'
+                    )
                 ),
                 view=self
             )
 
         except Exception as e:
 
-            print(f'Mines interaction error: {e}')
+            print(
+                f'Mines interaction error: {e}'
+            )
 
-            # Only send a response if Discord has not received one
             if not interaction.response.is_done():
 
                 try:
 
                     await interaction.response.send_message(
-                        '❌ An error occurred while processing that tile.',
+                        '❌ An error occurred while '
+                        'processing that tile.',
                         ephemeral=True
                     )
 
                 except Exception:
                     pass
+
+    # ========================================================
+    # REACTION CASHOUT
+    # ========================================================
+
+    async def reaction_cashout(self, user):
+
+        if self.finished:
+            return
+
+        if user.id != self.author_id:
+            return
+
+        # ----------------------------------------------------
+        # MUST REVEAL AT LEAST ONE DIAMOND
+        # ----------------------------------------------------
+
+        if self.revealed <= 0:
+
+            try:
+
+                await self.message.remove_reaction(
+                    '💰',
+                    user
+                )
+
+            except Exception:
+                pass
+
+            return
+
+        # ----------------------------------------------------
+        # END GAME
+        # ----------------------------------------------------
+
+        self.finished = True
+        self.stop()
+
+        multiplier = self.multiplier()
+
+        payout = (
+            self.amount * multiplier
+        ).quantize(Decimal('0.01'))
+
+        ACTIVE_MINES.pop(
+            self.message.id,
+            None
+        )
+
+        # ----------------------------------------------------
+        # DISABLE BOARD
+        # ----------------------------------------------------
+
+        for x in self.children:
+            x.disabled = True
+
+        # ----------------------------------------------------
+        # CASHOUT EMBED
+        # ----------------------------------------------------
+
+        cashout_embed = emb(
+            '🎉 Game Won!',
+            (
+                f'**Bet Amount:** '
+                f'{money(self.amount)} points\n'
+
+                f'**Current Multiplier:** '
+                f'`{multiplier:.2f}x`\n'
+
+                f'**Profit:** '
+                f'{money(payout - self.amount)} points\n\n'
+
+                f'{self.bombs} {MINES_BOMB} | '
+                f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
+
+                f'💎 **Diamonds Found:** '
+                f'**{self.revealed}**\n'
+
+                f'💰 **Cashed out successfully!**\n\n'
+
+                f'**Payout:** '
+                f'`{money(payout)} points`\n\n'
+
+                f'🔒 **Provably Fair:**\n'
+                f'• **Public Hash:** '
+                f'`{self.public_hash}`\n'
+
+                f'• **Server Seed:** '
+                f'`{self.server}`\n'
+
+                f'• **Client Seed:** '
+                f'`{self.client}`'
+            ),
+            GREEN
+        )
+
+        # ----------------------------------------------------
+        # EDIT MESSAGE
+        # ----------------------------------------------------
+
+        try:
+
+            await self.message.edit(
+                embed=cashout_embed,
+                view=self
+            )
+
+        except Exception as e:
+
+            print(
+                f'Mines cashout message error: {e}'
+            )
+
+        # ----------------------------------------------------
+        # DATABASE
+        # ----------------------------------------------------
+
+        try:
+
+            await db.record(
+                self.author_id,
+                'Mines',
+                self.amount,
+                'win',
+                payout
+            )
+
+        except Exception as e:
+
+            print(
+                f'Mines cashout DB error: {e}'
+            )
+
+        # ----------------------------------------------------
+        # REMOVE USER REACTION
+        # ----------------------------------------------------
+
+        try:
+
+            await self.message.remove_reaction(
+                '💰',
+                user
+            )
+
+        except Exception:
+            pass
 
     # ========================================================
     # TIMEOUT
@@ -3219,21 +3232,26 @@ class MinesView(discord.ui.View):
         self.finished = True
         self.stop()
 
-        ACTIVE_MINES.pop(
-            self.message.id if self.message else 0,
-            None
-        )
+        if self.message:
 
-        # Disable board
+            ACTIVE_MINES.pop(
+                self.message.id,
+                None
+            )
+
+        # ----------------------------------------------------
+        # DISABLE BOARD
+        # ----------------------------------------------------
+
         for x in self.children:
             x.disabled = True
 
         if not self.message:
             return
 
-        # ----------------------------------------------------
+        # ====================================================
         # AUTO CASHOUT
-        # ----------------------------------------------------
+        # ====================================================
 
         if self.revealed > 0:
 
@@ -3246,18 +3264,29 @@ class MinesView(discord.ui.View):
             timeout_embed = emb(
                 '⏰ Game Over!',
                 (
-                    f'**Bet Amount:** {money(self.amount)} points\n'
-                    f'**Current Multiplier:** `{multiplier:.2f}x`\n'
-                    f'**Payout:** {money(payout)} points\n\n'
+                    f'**Bet Amount:** '
+                    f'{money(self.amount)} points\n'
+
+                    f'**Current Multiplier:** '
+                    f'`{multiplier:.2f}x`\n'
+
+                    f'**Payout:** '
+                    f'{money(payout)} points\n\n'
 
                     f'💎 Automatically cashed out after '
                     f'**{self.revealed} diamonds**.\n\n'
 
                     f'🔒 **Provably Fair:**\n'
-                    f'• **Public Hash:** `{self.public_hash}`\n'
-                    f'• **Server Seed:** `{self.server}`\n'
-                    f'• **Client Seed:** `{self.client}`'
-                )
+                    f'• **Public Hash:** '
+                    f'`{self.public_hash}`\n'
+
+                    f'• **Server Seed:** '
+                    f'`{self.server}`\n'
+
+                    f'• **Client Seed:** '
+                    f'`{self.client}`'
+                ),
+                GREEN
             )
 
             await self.message.edit(
@@ -3277,23 +3306,29 @@ class MinesView(discord.ui.View):
 
             except Exception as e:
 
-                print(f'Mines timeout DB error: {e}')
+                print(
+                    f'Mines timeout DB error: {e}'
+                )
 
-        # ----------------------------------------------------
+        # ====================================================
         # NO DIAMOND
-        # ----------------------------------------------------
+        # ====================================================
 
         else:
 
             timeout_embed = emb(
                 '⏰ Game Over!',
                 (
-                    f'**Bet Amount:** {money(self.amount)} points\n'
-                    f'**Current Multiplier:** `1.00x`\n'
+                    f'**Bet Amount:** '
+                    f'{money(self.amount)} points\n'
+
+                    f'**Current Multiplier:** '
+                    f'`1.00x`\n'
+
                     f'**Profit:** 0 points\n\n'
 
-                    f'❌ No diamond was revealed before the game '
-                    f'timed out.'
+                    f'❌ No diamond was revealed before '
+                    f'the game timed out.'
                 ),
                 RED
             )
@@ -3315,7 +3350,83 @@ class MinesView(discord.ui.View):
 
             except Exception as e:
 
-                print(f'Mines timeout DB error: {e}')
+                print(
+                    f'Mines timeout DB error: {e}'
+                )
+
+
+# ============================================================
+# MINES CASHOUT REACTION
+# ============================================================
+
+@bot.event
+async def on_raw_reaction_add(payload):
+
+    # Ignore bot reactions
+    if bot.user and payload.user_id == bot.user.id:
+        return
+
+    # Only 💰
+    if str(payload.emoji) != '💰':
+        return
+
+    # Find active Mines game
+    view = ACTIVE_MINES.get(
+        payload.message_id
+    )
+
+    if not isinstance(view, MinesView):
+        return
+
+    # Get user
+    user = bot.get_user(
+        payload.user_id
+    )
+
+    if user is None:
+
+        try:
+
+            user = await bot.fetch_user(
+                payload.user_id
+            )
+
+        except Exception:
+            return
+
+    # --------------------------------------------------------
+    # ONLY THE PLAYER CAN CASH OUT
+    # --------------------------------------------------------
+
+    if user.id != view.author_id:
+
+        try:
+
+            channel = bot.get_channel(
+                payload.channel_id
+            )
+
+            if channel:
+
+                message = await channel.fetch_message(
+                    payload.message_id
+                )
+
+                await message.remove_reaction(
+                    payload.emoji,
+                    user
+                )
+
+        except Exception:
+            pass
+
+        return
+
+    # --------------------------------------------------------
+    # CASH OUT
+    # --------------------------------------------------------
+
+    await view.reaction_cashout(user)
 
 
 # ============================================================
@@ -3323,7 +3434,15 @@ class MinesView(discord.ui.View):
 # ============================================================
 
 @bot.command()
-async def mines(ctx, amount: Decimal, bombs: int = 4):
+async def mines(
+    ctx,
+    amount: Decimal,
+    bombs: int = 4
+):
+
+    # --------------------------------------------------------
+    # VALIDATE BOMBS
+    # --------------------------------------------------------
 
     if bombs < 1 or bombs > 20:
 
@@ -3335,10 +3454,25 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
             )
         )
 
-    if not await require_game(ctx, amount):
+    # --------------------------------------------------------
+    # CHECK GAME REQUIREMENTS
+    # --------------------------------------------------------
+
+    if not await require_game(
+        ctx,
+        amount
+    ):
         return
 
+    # --------------------------------------------------------
+    # GENERATE SEEDS
+    # --------------------------------------------------------
+
     server, client, public_hash = seed()
+
+    # --------------------------------------------------------
+    # CREATE VIEW
+    # --------------------------------------------------------
 
     view = MinesView(
         ctx.author.id,
@@ -3349,6 +3483,10 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
         public_hash
     )
 
+    # --------------------------------------------------------
+    # SEND GAME
+    # --------------------------------------------------------
+
     message = await ctx.send(
         embed=view.game_embed(),
         view=view
@@ -3356,10 +3494,25 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
 
     view.message = message
 
+    # --------------------------------------------------------
+    # SAVE ACTIVE GAME
+    # --------------------------------------------------------
+
     ACTIVE_MINES[message.id] = view
 
-    # 💰 = cashout reaction
-    await message.add_reaction('💰')
+    # --------------------------------------------------------
+    # CASHOUT REACTION
+    # --------------------------------------------------------
+
+    try:
+
+        await message.add_reaction('💰')
+
+    except Exception as e:
+
+        print(
+            f'Mines reaction error: {e}'
+        )
 @bot.command()
 async def rps(ctx, member: discord.Member, amount: Decimal):
     if member.bot or member==ctx.author or amount<=0: return await ctx.send(embed=emb('Invalid challenge','Choose another member and a positive bet.',RED))
