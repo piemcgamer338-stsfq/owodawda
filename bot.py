@@ -45,12 +45,98 @@ async def require_game(ctx, amount):
     if amount <= 0: await ctx.send(embed=emb('Invalid bet','Bet amount must be greater than zero.',RED)); return False
     if not await db.take_bet(ctx.author.id, amount): await ctx.send(embed=emb('Insufficient balance',f'You need **{money(amount)} points** to play.',RED)); return False
     return True
+# ============================================================
+# GAME WIN LOG
+# ============================================================
+
+async def announce_game_win(user, payout):
+    """Send a new message to the configured game log channel."""
+
+    if not LOG_CHANNEL_ID:
+        return
+
+    channel = bot.get_channel(LOG_CHANNEL_ID)
+
+    if not channel:
+        return
+
+    try:
+        username = user.display_name
+
+        await channel.send(
+            f'✅ **{username}** won **{money(payout)} points!**'
+        )
+
+    except Exception as e:
+        print(f'Game win log error: {e}')
+
+
+# ============================================================
+# GAME FINISH
+# ============================================================
+
 async def finish(ctx, game, amount, won, multiplier, detail, image=None):
-    payout=(amount*multiplier).quantize(Decimal('0.01')) if won else Decimal('0')
-    await db.record(ctx.author.id,game,amount,'win' if won else 'loss',payout)
-    e=emb(f'{game} — You {"Won" if won else "Lost"}',f'**Bet:** {money(amount)} points\n{detail}\n\n'+(f'Congratulations! You received **{money(payout)} points**.' if won else 'Better luck next time.'),GREEN if won else RED)
-    if image: e.set_image(url=f'attachment://{image.name}'); await ctx.send(embed=e,file=discord.File(image))
-    else: await ctx.send(embed=e)
+
+    payout = (
+        amount * multiplier
+    ).quantize(Decimal('0.01')) if won else Decimal('0')
+
+    # Save game result
+    await db.record(
+        ctx.author.id,
+        game,
+        amount,
+        'win' if won else 'loss',
+        payout
+    )
+
+    # --------------------------------------------------------
+    # PUBLIC WIN LOG
+    # ONLY WINS ARE ANNOUNCED
+    # --------------------------------------------------------
+
+    if won:
+        await announce_game_win(
+            ctx.author,
+            payout
+        )
+
+    # --------------------------------------------------------
+    # NORMAL GAME RESULT
+    # --------------------------------------------------------
+
+    e = emb(
+        f'{game} — You {"Won" if won else "Lost"}',
+        (
+            f'**Bet:** {money(amount)} points\n'
+            f'{detail}\n\n'
+            + (
+                f'Congratulations! You received '
+                f'**{money(payout)} points**.'
+                if won
+                else
+                'Better luck next time.'
+            )
+        ),
+        GREEN if won else RED
+    )
+
+    if image:
+
+        e.set_image(
+            url=f'attachment://{image.name}'
+        )
+
+        await ctx.send(
+            embed=e,
+            file=discord.File(image)
+        )
+
+    else:
+
+        await ctx.send(
+            embed=e
+        )
 
 def result_embed(game, amount, won, multiplier, detail):
     payout=(amount*multiplier).quantize(Decimal('0.01')) if won else Decimal('0')
