@@ -1028,25 +1028,66 @@ async def lbreset_error(ctx, error):
 # LEADERBOARD RESET
 # ============================================================
 
-@bot.command()
-@commands.is_owner()
+# ============================================================
+# LBRESET
+# ============================================================
+
+# Remove any previously registered lbreset command
+bot.remove_command("lbreset")
+
+
+@bot.command(name="lbreset")
+@commands.has_permissions(administrator=True)
 async def lbreset(ctx):
 
-    await db.pool.execute("""
-        UPDATE users
-        SET
-            daily_wager = 0,
-            weekly_wager = 0,
-            monthly_wager = 0
-    """)
+    try:
 
-    await ctx.send(
-        embed=emb(
-            '🏆 Leaderboard Reset',
-            'Daily, weekly, and monthly wager leaderboards have been reset to **0**.',
-            GREEN
+        await db.pool.execute(
+            """
+            UPDATE users
+            SET wagered = 0
+            """
         )
-    )
+
+        await ctx.send(
+            embed=emb(
+                "🏆 Wager Race Reset",
+                (
+                    "The wager race leaderboard has been "
+                    "**completely reset**.\n\n"
+                    "All player wager amounts are now "
+                    "**0 points**.\n\n"
+                    "A new wager race has started!"
+                ),
+                GREEN
+            )
+        )
+
+    except Exception as e:
+
+        print(f"LBReset error: {e}")
+
+        await ctx.send(
+            embed=emb(
+                "❌ Reset Failed",
+                f"Could not reset the wager leaderboard.\n\n`{e}`",
+                RED
+            )
+        )
+
+
+@lbreset.error
+async def lbreset_error(ctx, error):
+
+    if isinstance(error, commands.MissingPermissions):
+
+        await ctx.send(
+            embed=emb(
+                "❌ Permission Denied",
+                "You need **Administrator** permission to use `.lbreset`.",
+                RED
+            )
+        )
 @bot.command()
 async def guide(ctx): await ctx.send(embed=emb('LiteBet Guide','Start with `.daily`, then use `.balance`. Every game deducts its bet first, and its provably-fair seeds are shown in the result. Use `.help` to browse commands.'))
 @bot.command(aliases=['games'])
