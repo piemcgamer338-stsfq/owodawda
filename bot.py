@@ -95,38 +95,6 @@ class HiloView(discord.ui.View):
             mult=Decimal('1')+Decimal(self.streak)*Decimal('.20'); await db.record(self.author_id,'Hi-Lo',self.amount,'win',(self.amount*mult).quantize(Decimal('.01')))
             await self.message.edit(embed=result_embed('Hi-Lo',self.amount,True,mult,'Auto-cashed out after timeout.'),view=None)
 
-class MinesView(discord.ui.View):
-    def __init__(self, author_id, amount, bombs, server, client, public_hash):
-        super().__init__(timeout=120); self.author_id=author_id; self.amount=amount; self.bombs=bombs; self.mines=set(random.sample(range(25),bombs)); self.revealed=0; self.server=server; self.client=client; self.public_hash=public_hash; self.message=None
-        for i in range(25):
-            b=discord.ui.Button(label=str(i+1),style=discord.ButtonStyle.secondary,row=i//5,custom_id=f'mine:{i}')
-            b.callback=self.pick; self.add_item(b)
-    def multiplier(self): return (Decimal('1')+Decimal(self.revealed)*Decimal('.12')).quantize(Decimal('.01'))
-    def game_embed(self, extra='React with the money-bag emoji below to cash out.'):
-        return emb('Mines',f'**Bet Amount:** {money(self.amount)}\n**Current Multiplier:** {self.multiplier():.2f}x\n**Profit:** {money(self.amount*(self.multiplier()-1))} points\n{self.bombs} bombs | {25-self.bombs} diamonds\n\n{extra}\nPublic Hash: `{self.public_hash}`')
-    async def interaction_check(self, interaction):
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message('Only the player who started this Mines game can reveal tiles.',ephemeral=True); return False
-        return True
-    async def pick(self,interaction):
-        index=int(interaction.data['custom_id'].split(':')[1]); button=next(x for x in self.children if x.custom_id==interaction.data['custom_id'])
-        button.disabled=True
-        if index in self.mines:
-            button.style=discord.ButtonStyle.danger; button.label='BOMB'
-            for x in self.children:
-                if int(x.custom_id.split(':')[1]) in self.mines: x.style=discord.ButtonStyle.danger; x.label='BOMB'; x.disabled=True
-            await db.record(self.author_id,'Mines',self.amount,'loss',Decimal('0')); ACTIVE_MINES.pop(interaction.message.id,None)
-            return await interaction.response.edit_message(embed=result_embed('Mines',self.amount,False,Decimal('0'),f'You hit a bomb.\nServer Seed: `{self.server}`\nClient Seed: `{self.client}`'),view=self)
-        self.revealed+=1; button.style=discord.ButtonStyle.success; button.label='GEM'
-        await interaction.response.edit_message(embed=self.game_embed(),view=self)
-    async def cash_out(self):
-        if not self.message or self.revealed==0: return False
-        payout=(self.amount*self.multiplier()).quantize(Decimal('.01')); await db.record(self.author_id,'Mines',self.amount,'win',payout); ACTIVE_MINES.pop(self.message.id,None)
-        await self.message.edit(embed=result_embed('Mines',self.amount,True,self.multiplier(),f'Cashout after **{self.revealed}** diamonds.\nServer Seed: `{self.server}`\nClient Seed: `{self.client}`'),view=None); return True
-    async def on_timeout(self):
-        if self.revealed: await self.cash_out()
-        elif self.message: await db.record(self.author_id,'Mines',self.amount,'loss',Decimal('0')); await self.message.edit(embed=result_embed('Mines',self.amount,False,Decimal('0'),'No tile was selected before the game timed out.'),view=None)
-
 class HelpSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(
