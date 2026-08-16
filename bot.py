@@ -292,25 +292,74 @@ class HelpView(discord.ui.View):
 
 class RainView(discord.ui.View):
     def __init__(self, host_id, amount, seconds):
-        super().__init__(timeout=seconds); self.host_id=host_id; self.amount=amount; self.entries=set()
-    @discord.ui.button(label='Join Rain', emoji='🌧️', style=discord.ButtonStyle.primary)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.bot: return await interaction.response.defer()
-        user=await db.user(interaction.user.id)
-        if Decimal(user['deposited_points']) < Decimal('50'):
-            return await interaction.response.send_message('You need at least **50 lifetime deposited points** to join rain.',ephemeral=True)
-        self.entries.add(interaction.user.id)
-        await interaction.response.send_message('You joined the rain! 🌧️',ephemeral=True)
-    async def on_timeout(self):
-        if not self.message: return
-        if not self.entries:
-            await db.balance(self.host_id,self.amount)
-            return await self.message.edit(embed=emb('Rain ended','Nobody eligible joined, so the host was refunded.',RED),view=None)
-        share=(self.amount/len(self.entries)).quantize(Decimal('.01'))
-        for uid in self.entries: await db.balance(uid,share)
-        text=f'**{len(self.entries)}** eligible members joined and each received **{money(share)} points**.'
-        await self.message.edit(embed=emb('🌧️ Rain ended',text,GREEN),view=None)
+        super().__init__(timeout=seconds)
+        self.host_id = host_id
+        self.amount = amount
+        self.entries = set()
 
+    @discord.ui.button(
+        label='Join Rain',
+        emoji='🌧️',
+        style=discord.ButtonStyle.primary
+    )
+    async def join(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        if interaction.user.bot:
+            return await interaction.response.defer()
+
+        # Everyone can join the rain
+        self.entries.add(interaction.user.id)
+
+        await interaction.response.send_message(
+            'You joined the rain! 🌧️',
+            ephemeral=True
+        )
+
+    async def on_timeout(self):
+        if not self.message:
+            return
+
+        if not self.entries:
+            await db.balance(
+                self.host_id,
+                self.amount
+            )
+
+            return await self.message.edit(
+                embed=emb(
+                    'Rain ended',
+                    'Nobody joined, so the host was refunded.',
+                    RED
+                ),
+                view=None
+            )
+
+        share = (
+            self.amount / len(self.entries)
+        ).quantize(Decimal('.01'))
+
+        for uid in self.entries:
+            await db.balance(
+                uid,
+                share
+            )
+
+        text = (
+            f'**{len(self.entries)}** members joined '
+            f'and each received **{money(share)} points**.'
+        )
+
+        await self.message.edit(
+            embed=emb(
+                '🌧️ Rain ended',
+                text,
+                GREEN
+            ),
+            view=None
+        )
 @bot.event
 async def on_ready():
     print(f'LiteBet ready as {bot.user}')
