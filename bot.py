@@ -3123,11 +3123,6 @@ async def hilo(ctx, amount: Decimal):
 MINES_DIAMOND = '<:diamond:1538364736251629640>'
 MINES_BOMB = '<:bomb:1538364767201271808>'
 
-# Transparent payout factor.
-# 1.00 = normal calculated multiplier
-# 0.50 = roughly half the calculated multiplier
-MINES_PAYOUT_FACTOR = Decimal('0.50')
-
 
 class MinesView(discord.ui.View):
 
@@ -3208,47 +3203,33 @@ class MinesView(discord.ui.View):
     # MULTIPLIER
     # ========================================================
 
-  def multiplier(self):
+    def multiplier(self):
 
-    if self.revealed <= 0:
-        return Decimal('1.00')
+        if self.revealed <= 0:
+            return Decimal('1.00')
 
-    multiplier = Decimal('1.00')
-    house_edge = Decimal('0.97')
+        multiplier = Decimal('1.00')
 
-    for i in range(self.revealed):
+        # Slightly stronger house edge than the fair
+        # probability multiplier.
+        house_edge = Decimal('0.97')
 
-        remaining_tiles = self.total_tiles - i
-        remaining_safe = self.safe_tiles - i
+        for i in range(self.revealed):
 
-        if remaining_safe <= 0:
-            break
+            remaining_tiles = self.total_tiles - i
+            remaining_safe = self.safe_tiles - i
 
-        step = (
-            Decimal(remaining_tiles)
-            / Decimal(remaining_safe)
-        )
+            if remaining_safe <= 0:
+                break
 
-        step *= house_edge
+            step = (
+                Decimal(remaining_tiles)
+                / Decimal(remaining_safe)
+            )
 
-        multiplier *= step
+            step *= house_edge
 
-    return multiplier.quantize(
-        Decimal('0.01')
-    )
-        # ----------------------------------------------------
-        # APPLY LOWER PAYOUT FACTOR
-        # ----------------------------------------------------
-
-        multiplier = (
-            base_multiplier
-            * MINES_PAYOUT_FACTOR
-        )
-
-        # Never let a successful first reveal pay below 1x.
-        if multiplier < Decimal('1.00'):
-
-            multiplier = Decimal('1.00')
+            multiplier *= step
 
         return multiplier.quantize(
             Decimal('0.01')
@@ -3274,6 +3255,7 @@ class MinesView(discord.ui.View):
 
                     if index in self.mines:
                         cells.append(MINES_BOMB)
+
                     else:
                         cells.append(MINES_DIAMOND)
 
@@ -3381,14 +3363,29 @@ class MinesView(discord.ui.View):
 
         try:
 
-            index = int(
-                interaction.data['custom_id'].split(':')[1]
+            custom_id = interaction.data.get(
+                'custom_id',
+                ''
             )
+
+            if not custom_id.startswith('mine:'):
+                return
+
+            index = int(
+                custom_id.split(':')[1]
+            )
+
+            if index < 0 or index >= self.total_tiles:
+
+                return await interaction.response.send_message(
+                    '❌ Invalid tile.',
+                    ephemeral=True
+                )
 
             button = next(
                 (
                     x for x in self.children
-                    if x.custom_id == interaction.data['custom_id']
+                    if x.custom_id == custom_id
                 ),
                 None
             )
@@ -3425,7 +3422,10 @@ class MinesView(discord.ui.View):
                     None
                 )
 
-                # Reveal board
+                # ------------------------------------------------
+                # REVEAL BOARD
+                # ------------------------------------------------
+
                 for x in self.children:
 
                     x.disabled = True
@@ -3453,6 +3453,10 @@ class MinesView(discord.ui.View):
 
                         x.emoji = '💎'
                         x.style = discord.ButtonStyle.secondary
+
+                # ------------------------------------------------
+                # LOSS
+                # ------------------------------------------------
 
                 loss_embed = emb(
                     '❌ Game Over!',
@@ -3511,6 +3515,7 @@ class MinesView(discord.ui.View):
             # =================================================
 
             self.revealed += 1
+
             self.revealed_tiles.add(index)
 
             button.disabled = True
@@ -3541,7 +3546,10 @@ class MinesView(discord.ui.View):
                     None
                 )
 
-                # Reveal board
+                # ------------------------------------------------
+                # REVEAL BOARD
+                # ------------------------------------------------
+
                 for x in self.children:
 
                     x.disabled = True
@@ -3564,6 +3572,10 @@ class MinesView(discord.ui.View):
 
                         x.emoji = '💎'
                         x.style = discord.ButtonStyle.success
+
+                # ------------------------------------------------
+                # WIN
+                # ------------------------------------------------
 
                 win_embed = emb(
                     '🎉 Game Won!',
@@ -3698,9 +3710,16 @@ class MinesView(discord.ui.View):
             None
         )
 
-        # Disable all components
+        # ----------------------------------------------------
+        # DISABLE EVERYTHING
+        # ----------------------------------------------------
+
         for x in self.children:
             x.disabled = True
+
+        # ----------------------------------------------------
+        # CASHOUT EMBED
+        # ----------------------------------------------------
 
         cashout_embed = emb(
             '🎉 Cashed Out!',
