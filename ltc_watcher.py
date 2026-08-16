@@ -18,6 +18,74 @@ REQUIRED_CONFIRMATIONS = int(
 
 BASE_URL = "https://litecoinspace.org/api"
 
+# CoinGecko public price API
+PRICE_URL = (
+    "https://api.coingecko.com/api/v3/simple/price"
+    "?ids=litecoin&vs_currencies=usd"
+)
+
+
+# ============================================================
+# GET CURRENT LTC/USD PRICE
+# ============================================================
+
+async def get_ltc_usd_price(session):
+
+    try:
+
+        async with session.get(
+            PRICE_URL,
+            timeout=aiohttp.ClientTimeout(total=20)
+        ) as response:
+
+            if response.status != 200:
+
+                print(
+                    "[LTC WATCHER] "
+                    f"LTC price API error {response.status}"
+                )
+
+                return None
+
+            data = await response.json()
+
+            price = (
+                data
+                .get("litecoin", {})
+                .get("usd")
+            )
+
+            if price is None:
+
+                print(
+                    "[LTC WATCHER] "
+                    "LTC price missing from API response"
+                )
+
+                return None
+
+            price = Decimal(str(price))
+
+            if price <= 0:
+
+                print(
+                    "[LTC WATCHER] "
+                    f"Invalid LTC price: {price}"
+                )
+
+                return None
+
+            return price
+
+    except Exception as e:
+
+        print(
+            "[LTC WATCHER] "
+            f"LTC price error: {e}"
+        )
+
+        return None
+
 
 # ============================================================
 # GET CURRENT BLOCK HEIGHT
@@ -134,7 +202,6 @@ def get_received_ltc(
             0
         )
 
-        # Litecoin Space uses litoshis.
         received += (
             Decimal(str(value))
             / Decimal("100000000")
@@ -190,7 +257,8 @@ async def check_address(
     db,
     user_id,
     address,
-    tip_height
+    tip_height,
+    ltc_usd_price
 ):
 
     transactions = await get_address_transactions(
@@ -215,7 +283,7 @@ async def check_address(
                 continue
 
             # -----------------------------------------------
-            # HOW MANY CONFIRMATIONS?
+            # CONFIRMATIONS
             # -----------------------------------------------
 
             confirmations = get_confirmations(
@@ -224,7 +292,7 @@ async def check_address(
             )
 
             # -----------------------------------------------
-            # HOW MUCH LTC WAS SENT TO THIS ADDRESS?
+            # LTC RECEIVED
             # -----------------------------------------------
 
             received_ltc = get_received_ltc(
@@ -245,27 +313,41 @@ async def check_address(
                 txid=txid,
                 address=address,
                 ltc_amount=received_ltc,
-                confirmations=confirmations
+                confirmations=confirmations,
+                ltc_usd_price=ltc_usd_price
             )
 
             # -----------------------------------------------
-            # NEW DEPOSIT FOUND
+            # NEW DEPOSIT
             # -----------------------------------------------
 
             if result.get("inserted"):
+
+                points = Decimal(
+                    str(result.get("points", "0"))
+                )
+
+                usd_value = (
+                    received_ltc
+                    * ltc_usd_price
+                ).quantize(
+                    Decimal("0.01")
+                )
 
                 print(
                     "[LTC WATCHER] "
                     f"Deposit detected | "
                     f"user={user_id} | "
-                    f"address={address} | "
                     f"txid={txid} | "
                     f"amount={received_ltc} LTC | "
+                    f"LTC price=${ltc_usd_price} | "
+                    f"value=${usd_value} | "
+                    f"points={points} | "
                     f"confirmations={confirmations}"
                 )
 
             # -----------------------------------------------
-            # DEPOSIT CREDITED
+            # CREDITED
             # -----------------------------------------------
 
             if result.get("credited"):
@@ -274,12 +356,21 @@ async def check_address(
                     str(result["points"])
                 )
 
+                usd_value = (
+                    received_ltc
+                    * ltc_usd_price
+                ).quantize(
+                    Decimal("0.01")
+                )
+
                 print(
                     "[LTC WATCHER] "
                     f"DEPOSIT CREDITED | "
                     f"user={user_id} | "
                     f"txid={txid} | "
                     f"amount={received_ltc} LTC | "
+                    f"LTC price=${ltc_usd_price} | "
+                    f"value=${usd_value} | "
                     f"points={points} | "
                     f"confirmations={confirmations}"
                 )
@@ -292,7 +383,6 @@ async def check_address(
                 "already_credited"
             ):
 
-                # Don't spam Railway logs.
                 pass
 
         except Exception as e:
@@ -334,6 +424,11 @@ async def ltc_watcher(db):
         f"{REQUIRED_CONFIRMATIONS}"
     )
 
+    print(
+        "[LTC WATCHER] "
+        "Point conversion: $0.0045 USD per point"
+    )
+
     async with aiohttp.ClientSession() as session:
 
         while True:
@@ -357,7 +452,35 @@ async def ltc_watcher(db):
                     continue
 
                 # -------------------------------------------
-                # GET ALL USER ADDRESSES
+                # GET CURRENT LTC/USD PRICE
+                # -------------------------------------------
+
+                ltc_usd_price = await get_ltc_usd_price(
+                    session
+                )
+
+                if ltc_usd_price is None:
+
+                    print(
+                        "[LTC WATCHER] "
+                        "Could not get LTC/USD price. "
+                        "Skipping this cycle."
+                    )
+
+                    await asyncio.sleep(
+                        CHECK_INTERVAL
+                    )
+
+                    continue
+
+                print(
+                    "[LTC WATCHER] "
+                    f"Current LTC price: "
+                    f"${ltc_usd_price}"
+                )
+
+                # -------------------------------------------
+                # GET USER ADDRESSES
                 # -------------------------------------------
 
                 addresses = (
@@ -404,7 +527,8 @@ async def ltc_watcher(db):
                             db,
                             user_id,
                             address,
-                            tip_height
+                            tip_height,
+                            ltc_usd_price
                         )
                     )
 
@@ -431,10 +555,6 @@ async def ltc_watcher(db):
                     f"Main loop error: {e}"
                 )
 
-            # -----------------------------------------------
-            # WAIT BEFORE NEXT CHECK
-            # -----------------------------------------------
-
             await asyncio.sleep(
                 CHECK_INTERVAL
-            )
+                    )
