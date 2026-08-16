@@ -308,6 +308,29 @@ async def reset_wagers():
 async def help(ctx):
     total=await db.pool.fetchval('SELECT COUNT(*) FROM users')
     await ctx.send(embed=emb('ℹ️ Help Command - Main Menu',f'Welcome to **LiteBet**, the Discord Litecoin Casino Bot.\n💡 New here? Read `.guide`\n\n**Rate:** 1 point = 0.0001 LTC\n**Total Commands:** 40+\n**Total Users:** {total}\n\n> Bot made by meow2004yr'),view=HelpView())
+# ============================================================
+# LEADERBOARD RESET
+# ============================================================
+
+@bot.command()
+@commands.is_owner()
+async def lbreset(ctx):
+
+    await db.pool.execute("""
+        UPDATE users
+        SET
+            daily_wager = 0,
+            weekly_wager = 0,
+            monthly_wager = 0
+    """)
+
+    await ctx.send(
+        embed=emb(
+            '🏆 Leaderboard Reset',
+            'Daily, weekly, and monthly wager leaderboards have been reset to **0**.',
+            GREEN
+        )
+    )
 @bot.command()
 async def guide(ctx): await ctx.send(embed=emb('LiteBet Guide','Start with `.daily`, then use `.balance`. Every game deducts its bet first, and its provably-fair seeds are shown in the result. Use `.help` to browse commands.'))
 @bot.command(aliases=['games'])
@@ -2334,16 +2357,29 @@ async def sethb(ctx, ltc: str, usd: str):
 
 WITHDRAWAL_LOG_CHANNEL = None
 
+# Minimum withdrawal = 111 points
+MIN_WITHDRAWAL = Decimal("111.00")
+
+# 1 point = 0.0001 LTC
+POINT_TO_LTC = Decimal("0.0001")
+
+
+# ============================================================
+# LTC ADDRESS VALIDATION
+# ============================================================
 
 def valid_ltc_address(address):
+
     if not address:
         return False
 
     address = address.strip()
 
+    # Litecoin bech32
     if address.startswith("ltc1"):
         return 43 <= len(address) <= 100
 
+    # Litecoin legacy
     if address.startswith(("L", "M", "3")):
         return 26 <= len(address) <= 35
 
@@ -2356,7 +2392,7 @@ def valid_ltc_address(address):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def wlog(ctx, channel: discord.TextChannel):
+async def wlog2(ctx, channel: discord.TextChannel):
 
     global WITHDRAWAL_LOG_CHANNEL
 
@@ -2365,51 +2401,69 @@ async def wlog(ctx, channel: discord.TextChannel):
     await ctx.send(
         embed=emb(
             "Withdrawal Logs Updated",
-            f"Withdrawal logs will now be sent to {channel.mention}.",
+            (
+                f"All withdrawal requests will now be sent to "
+                f"{channel.mention}.\n\n"
+                f"Admins can **Accept** or **Decline** withdrawals "
+                f"directly from the log."
+            ),
             GREEN
         )
     )
 
 
 # ============================================================
-# WITHDRAW
+# WITHDRAW COMMAND
 # ============================================================
 
 @bot.command()
 async def withdraw(ctx, points: str, address: str):
 
-    # --------------------------------------------------------
+    # ========================================================
     # AMOUNT
-    # --------------------------------------------------------
+    # ========================================================
 
     try:
-        amount = Decimal(points).quantize(Decimal("0.01"))
+
+        amount = Decimal(points).quantize(
+            Decimal("0.01")
+        )
 
     except (InvalidOperation, ValueError):
 
         return await ctx.send(
             embed=emb(
                 "Invalid Amount",
-                "Use a valid point amount.\n\n"
-                "Example:\n"
-                "`.withdraw 500 Lxxxxxxxxxxxxxxxxxxxxxxxx`",
+                (
+                    "Please enter a valid withdrawal amount.\n\n"
+                    "Example:\n"
+                    "`.withdraw 111 Lxxxxxxxxxxxxxxxxxxxxxxxx`"
+                ),
                 RED
             )
         )
 
-    if amount <= 0:
+    # ========================================================
+    # MINIMUM WITHDRAWAL
+    # ========================================================
+
+    if amount < MIN_WITHDRAWAL:
 
         return await ctx.send(
             embed=emb(
-                "Invalid Amount",
-                "Withdrawal amount must be greater than **0 points**.",
+                "Minimum Withdrawal",
+                (
+                    f"The minimum withdrawal is "
+                    f"**{money(MIN_WITHDRAWAL)} points**.\n\n"
+                    f"Minimum: **111 points**"
+                ),
                 RED
             )
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # LTC ADDRESS
-    # --------------------------------------------------------
+    # ========================================================
 
     address = address.strip()
 
@@ -2418,411 +2472,87 @@ async def withdraw(ctx, points: str, address: str):
         return await ctx.send(
             embed=emb(
                 "Invalid Litecoin Address",
-                "Please enter a valid Litecoin Mainnet address.",
+                (
+                    "Please enter a valid Litecoin Mainnet address."
+                ),
                 RED
             )
         )
 
-    # --------------------------------------------------------
-    # USER BALANCE
-    # --------------------------------------------------------
+    # ========================================================
+    # CHECK BALANCE
+    # ========================================================
 
-    u = await db.user(ctx.author.id)
-    balance = Decimal(str(u["balance"]))
+    user = await db.user(
+        ctx.author.id
+    )
+
+    if not user:
+
+        return await ctx.send(
+            embed=emb(
+                "Account Error",
+                "Your account could not be found.",
+                RED
+            )
+        )
+
+    balance = Decimal(
+        str(user["balance"])
+    )
 
     if balance < amount:
 
         return await ctx.send(
             embed=emb(
                 "Insufficient Balance",
-                f"You requested **{money(amount)} points** "
-                f"but only have **{money(balance)} points**.",
+                (
+                    f"You requested **{money(amount)} points** "
+                    f"but only have **{money(balance)} points**."
+                ),
                 RED
             )
         )
 
-    # --------------------------------------------------------
-    # POINTS → LTC
-    # 1 point = 0.0001 LTC
-    # --------------------------------------------------------
+    # ========================================================
+    # POINTS -> LTC
+    # ========================================================
 
     ltc_amount = (
-        amount * Decimal("0.0001")
-    ).quantize(Decimal("0.00000001"))
-
-    request_id = secrets.token_hex(8).upper()
-
-    # --------------------------------------------------------
-    # CONFIRMATION VIEW
-    # ONLY THE USER WHO CREATED THE REQUEST CAN CLICK
-    # --------------------------------------------------------
-
-    class WithdrawalView(discord.ui.View):
-
-        def __init__(self):
-
-            super().__init__(timeout=300)
-
-            self.finished = False
-
-        # ====================================================
-        # INTERACTION CHECK
-        # ====================================================
-
-        async def interaction_check(self, interaction):
-
-            if interaction.user.id != ctx.author.id:
-
-                await interaction.response.send_message(
-                    "❌ Only the user who requested this withdrawal "
-                    "can use these buttons.",
-                    ephemeral=True
-                )
-
-                return False
-
-            return True
-
-        # ====================================================
-        # ACCEPT
-        # ====================================================
-
-        @discord.ui.button(
-            label="Accept",
-            emoji="✅",
-            style=discord.ButtonStyle.success
-        )
-        async def accept(self, interaction, button):
-
-            if self.finished:
-                return
-
-            self.finished = True
-
-            # ------------------------------------------------
-            # REMOVE POINTS ATOMICALLY
-            # ------------------------------------------------
-
-            new_balance = await db.pool.fetchval(
-                """
-                UPDATE users
-                SET
-                    balance = balance - $2,
-                    withdrawals = withdrawals + $2
-                WHERE user_id = $1
-                  AND balance >= $2
-                RETURNING balance
-                """,
-                ctx.author.id,
-                amount
-            )
-
-            if new_balance is None:
-
-                for child in self.children:
-                    child.disabled = True
-
-                return await interaction.response.edit_message(
-                    embed=emb(
-                        "Withdrawal Failed",
-                        "You no longer have enough points "
-                        "for this withdrawal.",
-                        RED
-                    ),
-                    view=self
-                )
-
-            # ------------------------------------------------
-            # SAVE WITHDRAWAL
-            # ------------------------------------------------
-
-            try:
-
-                await db.pool.execute(
-                    """
-                    INSERT INTO withdrawals
-                    (user_id, address, points, ltc, status)
-                    VALUES ($1, $2, $3, $4, 'approved')
-                    """,
-                    ctx.author.id,
-                    address,
-                    amount,
-                    ltc_amount
-                )
-
-            except Exception as e:
-
-                print(f"Withdrawal DB error: {e}")
-
-            # ------------------------------------------------
-            # FAKE TRANSACTION ID
-            # ------------------------------------------------
-
-            txid = secrets.token_hex(16)
-
-            # ------------------------------------------------
-            # DISABLE BUTTONS
-            # ------------------------------------------------
-
-            for child in self.children:
-                child.disabled = True
-
-            # ------------------------------------------------
-            # SUCCESS MESSAGE
-            # ------------------------------------------------
-
-            success = discord.Embed(
-                title="💰 Withdrawal Successful!",
-                description=(
-                    f"Your withdrawal has been successfully processed.\n\n"
-                    f"**Points Withdrawn:** `{money(amount)}`\n"
-                    f"**LTC Sent:** `{ltc_amount:.8f} LTC`\n"
-                    f"**Address:** `{address}`\n\n"
-                    f"**Transaction ID:** `{txid}`"
-                ),
-                color=GREEN,
-                timestamp=datetime.now(timezone.utc)
-            )
-
-            success.set_footer(
-                text="LiteBet • Simulated Litecoin Withdrawal"
-            )
-
-            await interaction.response.edit_message(
-                embed=success,
-                view=self
-            )
-
-            # ------------------------------------------------
-            # DM USER
-            # ------------------------------------------------
-
-            try:
-
-                dm = discord.Embed(
-                    title="💰 Withdrawal Successful!",
-                    description=(
-                        f"Your withdrawal has been processed.\n\n"
-                        f"**Points:** `{money(amount)}`\n"
-                        f"**LTC:** `{ltc_amount:.8f} LTC`\n"
-                        f"**Address:** `{address}`\n"
-                        f"**Transaction ID:** `{txid}`"
-                    ),
-                    color=GREEN,
-                    timestamp=datetime.now(timezone.utc)
-                )
-
-                dm.set_footer(
-                    text="LiteBet • Simulated Litecoin Withdrawal"
-                )
-
-                await ctx.author.send(embed=dm)
-
-            except discord.Forbidden:
-
-                pass
-
-            # ------------------------------------------------
-            # AUTOMATIC WITHDRAWAL LOG
-            # ------------------------------------------------
-
-            if WITHDRAWAL_LOG_CHANNEL:
-
-                channel = bot.get_channel(
-                    WITHDRAWAL_LOG_CHANNEL
-                )
-
-                if channel:
-
-                    username = ctx.author.display_name
-
-                    log = discord.Embed(
-                        title="💰 LiteBet Withdrawal 💰",
-                        description=(
-                            f"🎉 **{username}** has successfully "
-                            f"withdrawn **{money(amount)} points** "
-                            f"for **{ltc_amount:.8f} LTC**!\n\n"
-                            f"🔗 **ID:** `{txid}`"
-                        ),
-                        color=GREEN,
-                        timestamp=datetime.now(timezone.utc)
-                    )
-
-                    log.set_footer(
-                        text="LiteBet"
-                    )
-
-                    try:
-
-                        await channel.send(
-                            embed=log
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"Withdrawal log error: {e}"
-                        )
-
-        # ====================================================
-        # DECLINE
-        # ====================================================
-
-        @discord.ui.button(
-            label="Decline",
-            emoji="❌",
-            style=discord.ButtonStyle.danger
-        )
-        async def decline(self, interaction, button):
-
-            if self.finished:
-                return
-
-            self.finished = True
-
-            # ------------------------------------------------
-            # DISABLE BUTTONS
-            # ------------------------------------------------
-
-            for child in self.children:
-                child.disabled = True
-
-            # ------------------------------------------------
-            # SAVE DECLINED WITHDRAWAL
-            # ------------------------------------------------
-
-            try:
-
-                await db.pool.execute(
-                    """
-                    INSERT INTO withdrawals
-                    (user_id, address, points, ltc, status)
-                    VALUES ($1, $2, $3, $4, 'declined')
-                    """,
-                    ctx.author.id,
-                    address,
-                    amount,
-                    ltc_amount
-                )
-
-            except Exception as e:
-
-                print(
-                    f"Declined withdrawal DB error: {e}"
-                )
-
-            # ------------------------------------------------
-            # DECLINED MESSAGE
-            # ------------------------------------------------
-
-            declined = discord.Embed(
-                title="❌ Withdrawal Declined",
-                description=(
-                    f"You declined your withdrawal request.\n\n"
-                    f"**Points:** `{money(amount)}`\n"
-                    f"**LTC:** `{ltc_amount:.8f} LTC`\n"
-                    f"**Address:** `{address}`\n\n"
-                    f"**No points were removed from your balance.**"
-                ),
-                color=RED,
-                timestamp=datetime.now(timezone.utc)
-            )
-
-            declined.set_footer(
-                text="LiteBet • Withdrawal"
-            )
-
-            await interaction.response.edit_message(
-                embed=declined,
-                view=self
-            )
-
-            # ------------------------------------------------
-            # AUTOMATIC DECLINE LOG
-            # ------------------------------------------------
-
-            if WITHDRAWAL_LOG_CHANNEL:
-
-                channel = bot.get_channel(
-                    WITHDRAWAL_LOG_CHANNEL
-                )
-
-                if channel:
-
-                    username = ctx.author.display_name
-
-                    log = discord.Embed(
-                        title="❌ LiteBet Withdrawal ❌",
-                        description=(
-                            f"🎉 **{username}** declined "
-                            f"a withdrawal of **{money(amount)} points** "
-                            f"for **{ltc_amount:.8f} LTC**.\n\n"
-                            f"🔗 **ID:** `{request_id}`"
-                        ),
-                        color=RED,
-                        timestamp=datetime.now(timezone.utc)
-                    )
-
-                    log.set_footer(
-                        text="LiteBet"
-                    )
-
-                    try:
-
-                        await channel.send(
-                            embed=log
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"Withdrawal decline log error: {e}"
-                        )
-
-        # ====================================================
-        # TIMEOUT
-        # ====================================================
-
-        async def on_timeout(self):
-
-            if self.finished:
-                return
-
-            self.finished = True
-
-            for child in self.children:
-                child.disabled = True
-
-            try:
-
-                await message.edit(
-                    embed=emb(
-                        "Withdrawal Expired",
-                        "This withdrawal confirmation expired.\n\n"
-                        "**No points were removed.**",
-                        RED
-                    ),
-                    view=self
-                )
-
-            except Exception:
-
-                pass
+        amount * POINT_TO_LTC
+    ).quantize(
+        Decimal("0.00000001")
+    )
 
     # ========================================================
-    # CONFIRMATION EMBED
+    # REQUEST ID
+    # ========================================================
+
+    request_id = secrets.token_hex(
+        8
+    ).upper()
+
+    # ========================================================
+    # INITIAL REQUEST MESSAGE
     # ========================================================
 
     confirmation = discord.Embed(
-        title="💸 Litecoin Withdrawal",
+        title="💸 Litecoin Withdrawal Requested",
         description=(
-            f"**{ctx.author.mention}**, please confirm your withdrawal.\n\n"
+            f"**{ctx.author.mention}**, your withdrawal request "
+            f"has been submitted.\n\n"
+
             f"**Points:** `{money(amount)}`\n"
-            f"**LTC Amount:** `{ltc_amount:.8f} LTC`\n"
-            f"**Address:**\n`{address}`\n\n"
+            f"**LTC Amount:** `{ltc_amount:.8f} LTC`\n\n"
+
+            f"**Litecoin Address:**\n"
+            f"```{address}```\n\n"
+
             f"**Request ID:** `{request_id}`\n\n"
-            f"Choose **Accept** to process the withdrawal "
-            f"or **Decline** to cancel it."
+
+            f"⏳ **Status:** `PENDING`\n\n"
+
+            f"An administrator will review your withdrawal."
         ),
         color=0xF0B90B,
         timestamp=datetime.now(timezone.utc)
@@ -2839,19 +2569,606 @@ async def withdraw(ctx, points: str, address: str):
     )
 
     confirmation.set_footer(
-        text="LiteBet • Withdrawal Confirmation"
+        text="LiteBet • Withdrawal System"
     )
-
-    # ========================================================
-    # SEND CONFIRMATION
-    # ========================================================
-
-    view = WithdrawalView()
 
     message = await ctx.send(
-        embed=confirmation,
-        view=view
+        embed=confirmation
     )
+
+    # ========================================================
+    # SAVE PENDING WITHDRAWAL
+    # ========================================================
+
+    try:
+
+        await db.pool.execute(
+            """
+            INSERT INTO withdrawals
+            (user_id, address, points, ltc, status)
+            VALUES ($1, $2, $3, $4, 'pending')
+            """,
+            ctx.author.id,
+            address,
+            amount,
+            ltc_amount
+        )
+
+    except Exception as e:
+
+        print(
+            f"Withdrawal pending DB error: {e}"
+        )
+
+    # ========================================================
+    # WITHDRAWAL LOG CHANNEL
+    # ========================================================
+
+    if WITHDRAWAL_LOG_CHANNEL:
+
+        log_channel = bot.get_channel(
+            WITHDRAWAL_LOG_CHANNEL
+        )
+
+        if log_channel:
+
+            # ------------------------------------------------
+            # ADMIN WITHDRAWAL VIEW
+            # ------------------------------------------------
+
+            class WithdrawalAdminView(discord.ui.View):
+
+                def __init__(self):
+
+                    super().__init__(
+                        timeout=None
+                    )
+
+                    self.processed = False
+
+                # ============================================
+                # ADMIN CHECK
+                # ============================================
+
+                async def interaction_check(
+                    self,
+                    interaction
+                ):
+
+                    if not interaction.user.guild_permissions.administrator:
+
+                        await interaction.response.send_message(
+                            "❌ Only administrators can process withdrawals.",
+                            ephemeral=True
+                        )
+
+                        return False
+
+                    if self.processed:
+
+                        await interaction.response.send_message(
+                            "❌ This withdrawal has already been processed.",
+                            ephemeral=True
+                        )
+
+                        return False
+
+                    return True
+
+                # ============================================
+                # ACCEPT
+                # ============================================
+
+                @discord.ui.button(
+                    label="Accept",
+                    emoji="✅",
+                    style=discord.ButtonStyle.success
+                )
+                async def accept(
+                    self,
+                    interaction,
+                    button
+                ):
+
+                    if self.processed:
+                        return
+
+                    self.processed = True
+
+                    # ----------------------------------------
+                    # ATOMIC BALANCE CHECK + DEDUCTION
+                    # ----------------------------------------
+
+                    new_balance = await db.pool.fetchval(
+                        """
+                        UPDATE users
+                        SET
+                            balance = balance - $2,
+                            withdrawals = withdrawals + $2
+                        WHERE user_id = $1
+                          AND balance >= $2
+                        RETURNING balance
+                        """,
+                        ctx.author.id,
+                        amount
+                    )
+
+                    # ----------------------------------------
+                    # NOT ENOUGH BALANCE
+                    # ----------------------------------------
+
+                    if new_balance is None:
+
+                        self.processed = False
+
+                        await interaction.response.send_message(
+                            (
+                                "❌ This withdrawal cannot be paid "
+                                "because the user no longer has "
+                                "enough balance."
+                            ),
+                            ephemeral=True
+                        )
+
+                        return
+
+                    # ----------------------------------------
+                    # UPDATE DATABASE
+                    # ----------------------------------------
+
+                    try:
+
+                        await db.pool.execute(
+                            """
+                            UPDATE withdrawals
+                            SET status = 'paid'
+                            WHERE user_id = $1
+                              AND address = $2
+                              AND points = $3
+                              AND status = 'pending'
+                            """,
+                            ctx.author.id,
+                            address,
+                            amount
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            f"Withdrawal paid DB error: {e}"
+                        )
+
+                    # ----------------------------------------
+                    # DISABLE BUTTONS
+                    # ----------------------------------------
+
+                    for child in self.children:
+                        child.disabled = True
+
+                    # ----------------------------------------
+                    # ADMIN WHO PAID
+                    # ----------------------------------------
+
+                    admin_name = interaction.user.display_name
+
+                    # ----------------------------------------
+                    # TIME
+                    # ----------------------------------------
+
+                    paid_time = datetime.now(
+                        timezone.utc
+                    )
+
+                    # ----------------------------------------
+                    # PAID LOG
+                    # ----------------------------------------
+
+                    paid_embed = discord.Embed(
+                        title="💰 Withdrawal — PAID",
+                        description=(
+                            f"**Amount:** "
+                            f"`{money(amount)} points`\n\n"
+
+                            f"**LTC Amount:** "
+                            f"`{ltc_amount:.8f} LTC`\n\n"
+
+                            f"**LTC Address:**\n"
+                            f"```{address}```\n\n"
+
+                            f"**User:** "
+                            f"{ctx.author.mention} "
+                            f"`{ctx.author.id}`\n\n"
+
+                            f"**Status:** `PAID`\n"
+                            f"**By:** {interaction.user.mention}\n"
+                            f"**Time:** "
+                            f"<t:{int(paid_time.timestamp())}:F>\n\n"
+
+                            f"**Request ID:** `{request_id}`"
+                        ),
+                        color=GREEN,
+                        timestamp=paid_time
+                    )
+
+                    paid_embed.set_footer(
+                        text="LiteBet • Withdrawal Logs"
+                    )
+
+                    # ----------------------------------------
+                    # RESPOND
+                    # ----------------------------------------
+
+                    await interaction.response.edit_message(
+                        embed=paid_embed,
+                        view=self
+                    )
+
+                    # ----------------------------------------
+                    # UPDATE ORIGINAL USER MESSAGE
+                    # ----------------------------------------
+
+                    try:
+
+                        user_embed = discord.Embed(
+                            title="💰 Withdrawal Paid",
+                            description=(
+                                f"Your withdrawal has been "
+                                f"approved and paid.\n\n"
+
+                                f"**Points:** "
+                                f"`{money(amount)}`\n"
+
+                                f"**LTC:** "
+                                f"`{ltc_amount:.8f} LTC`\n\n"
+
+                                f"**Address:**\n"
+                                f"```{address}```\n\n"
+
+                                f"**Status:** `PAID`\n"
+                                f"**Request ID:** `{request_id}`"
+                            ),
+                            color=GREEN,
+                            timestamp=paid_time
+                        )
+
+                        user_embed.set_footer(
+                            text="LiteBet • Withdrawal"
+                        )
+
+                        await message.edit(
+                            embed=user_embed
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            f"Withdrawal user message update error: {e}"
+                        )
+
+                    # ----------------------------------------
+                    # DM USER
+                    # ----------------------------------------
+
+                    try:
+
+                        dm = discord.Embed(
+                            title="💰 Withdrawal Paid",
+                            description=(
+                                f"Your withdrawal has been "
+                                f"approved.\n\n"
+
+                                f"**Points:** "
+                                f"`{money(amount)}`\n"
+
+                                f"**LTC:** "
+                                f"`{ltc_amount:.8f} LTC`\n\n"
+
+                                f"**Address:**\n"
+                                f"```{address}```\n\n"
+
+                                f"**Status:** `PAID`\n"
+                                f"**Request ID:** `{request_id}`"
+                            ),
+                            color=GREEN,
+                            timestamp=paid_time
+                        )
+
+                        await ctx.author.send(
+                            embed=dm
+                        )
+
+                    except Exception:
+                        pass
+
+                # ============================================
+                # DECLINE
+                # ============================================
+
+                @discord.ui.button(
+                    label="Decline",
+                    emoji="❌",
+                    style=discord.ButtonStyle.danger
+                )
+                async def decline(
+                    self,
+                    interaction,
+                    button
+                ):
+
+                    if self.processed:
+                        return
+
+                    self.processed = True
+
+                    # ----------------------------------------
+                    # UPDATE DATABASE
+                    # ----------------------------------------
+
+                    try:
+
+                        await db.pool.execute(
+                            """
+                            UPDATE withdrawals
+                            SET status = 'declined'
+                            WHERE user_id = $1
+                              AND address = $2
+                              AND points = $3
+                              AND status = 'pending'
+                            """,
+                            ctx.author.id,
+                            address,
+                            amount
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            f"Withdrawal decline DB error: {e}"
+                        )
+
+                    # ----------------------------------------
+                    # DISABLE BUTTONS
+                    # ----------------------------------------
+
+                    for child in self.children:
+                        child.disabled = True
+
+                    # ----------------------------------------
+                    # ADMIN
+                    # ----------------------------------------
+
+                    admin_name = interaction.user.display_name
+
+                    declined_time = datetime.now(
+                        timezone.utc
+                    )
+
+                    # ----------------------------------------
+                    # DECLINED LOG
+                    # ----------------------------------------
+
+                    declined_embed = discord.Embed(
+                        title="❌ Withdrawal — DECLINED",
+                        description=(
+                            f"**Amount:** "
+                            f"`{money(amount)} points`\n\n"
+
+                            f"**LTC Amount:** "
+                            f"`{ltc_amount:.8f} LTC`\n\n"
+
+                            f"**LTC Address:**\n"
+                            f"```{address}```\n\n"
+
+                            f"**User:** "
+                            f"{ctx.author.mention} "
+                            f"`{ctx.author.id}`\n\n"
+
+                            f"**Status:** `DECLINED`\n"
+                            f"**By:** {interaction.user.mention}\n"
+                            f"**Time:** "
+                            f"<t:{int(declined_time.timestamp())}:F>\n\n"
+
+                            f"**Request ID:** `{request_id}`"
+                        ),
+                        color=RED,
+                        timestamp=declined_time
+                    )
+
+                    declined_embed.set_footer(
+                        text="LiteBet • Withdrawal Logs"
+                    )
+
+                    await interaction.response.edit_message(
+                        embed=declined_embed,
+                        view=self
+                    )
+
+                    # ----------------------------------------
+                    # UPDATE ORIGINAL MESSAGE
+                    # ----------------------------------------
+
+                    try:
+
+                        user_embed = discord.Embed(
+                            title="❌ Withdrawal Declined",
+                            description=(
+                                f"Your withdrawal request "
+                                f"was declined.\n\n"
+
+                                f"**Points:** "
+                                f"`{money(amount)}`\n"
+
+                                f"**LTC:** "
+                                f"`{ltc_amount:.8f} LTC`\n\n"
+
+                                f"**Address:**\n"
+                                f"```{address}```\n\n"
+
+                                f"**Status:** `DECLINED`\n"
+                                f"**Request ID:** `{request_id}`\n\n"
+
+                                f"**No points were removed.**"
+                            ),
+                            color=RED,
+                            timestamp=declined_time
+                        )
+
+                        await message.edit(
+                            embed=user_embed
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            f"Withdrawal decline message error: {e}"
+                        )
+
+                    # ----------------------------------------
+                    # DM USER
+                    # ----------------------------------------
+
+                    try:
+
+                        dm = discord.Embed(
+                            title="❌ Withdrawal Declined",
+                            description=(
+                                f"Your withdrawal request "
+                                f"was declined.\n\n"
+
+                                f"**Points:** "
+                                f"`{money(amount)}`\n"
+
+                                f"**LTC:** "
+                                f"`{ltc_amount:.8f} LTC`\n\n"
+
+                                f"**Address:**\n"
+                                f"```{address}```\n\n"
+
+                                f"**Status:** `DECLINED`\n"
+                                f"**Request ID:** `{request_id}`\n\n"
+
+                                f"No points were removed."
+                            ),
+                            color=RED,
+                            timestamp=declined_time
+                        )
+
+                        await ctx.author.send(
+                            embed=dm
+                        )
+
+                    except Exception:
+                        pass
+
+            # ------------------------------------------------
+            # CREATE PENDING LOG
+            # ------------------------------------------------
+
+            log_embed = discord.Embed(
+                title="💸 Withdrawal — PENDING",
+                description=(
+                    f"**Amount:** "
+                    f"`{money(amount)} points`\n\n"
+
+                    f"**LTC Amount:** "
+                    f"`{ltc_amount:.8f} LTC`\n\n"
+
+                    f"**LTC Address:**\n"
+                    f"```{address}```\n\n"
+
+                    f"**User:** "
+                    f"{ctx.author.mention} "
+                    f"`{ctx.author.id}`\n\n"
+
+                    f"**Status:** `PENDING`\n"
+                    f"**Time:** "
+                    f"<t:{int(datetime.now(timezone.utc).timestamp())}:F>\n\n"
+
+                    f"**Request ID:** `{request_id}`\n\n"
+
+                    f"**Withdrawal Message:** "
+                    f"{message.jump_url}"
+                ),
+                color=0xF0B90B,
+                timestamp=datetime.now(timezone.utc)
+            )
+
+            log_embed.set_footer(
+                text="LiteBet • Withdrawal Logs"
+            )
+
+            try:
+
+                log_message = await log_channel.send(
+                    embed=log_embed,
+                    view=WithdrawalAdminView()
+                )
+
+                # --------------------------------------------
+                # ADD LOG MESSAGE LINK
+                # --------------------------------------------
+
+                log_embed.description = (
+                    f"**Amount:** "
+                    f"`{money(amount)} points`\n\n"
+
+                    f"**LTC Amount:** "
+                    f"`{ltc_amount:.8f} LTC`\n\n"
+
+                    f"**LTC Address:**\n"
+                    f"```{address}```\n\n"
+
+                    f"**User:** "
+                    f"{ctx.author.mention} "
+                    f"`{ctx.author.id}`\n\n"
+
+                    f"**Status:** `PENDING`\n"
+                    f"**Time:** "
+                    f"<t:{int(datetime.now(timezone.utc).timestamp())}:F>\n\n"
+
+                    f"**Request ID:** `{request_id}`\n\n"
+
+                    f"**Withdrawal Message:** "
+                    f"{message.jump_url}\n"
+
+                    f"**Log Message:** "
+                    f"{log_message.jump_url}"
+                )
+
+                await log_message.edit(
+                    embed=log_embed
+                )
+
+            except Exception as e:
+
+                print(
+                    f"Withdrawal log error: {e}"
+                )
+
+    # ========================================================
+    # NO LOG CHANNEL
+    # ========================================================
+
+    else:
+
+        try:
+
+            await ctx.send(
+                embed=emb(
+                    "Withdrawal Submitted",
+                    (
+                        "Your withdrawal request was submitted, "
+                        "but the withdrawal log channel has not "
+                        "been configured.\n\n"
+                        "An administrator needs to run:\n"
+                        "`.wlog2 #channel`"
+                    ),
+                    RED
+                )
+            )
+
+        except Exception:
+            pass
 @bot.command()
 async def worldtime(ctx):
     now=datetime.now(timezone.utc); await ctx.send(embed=emb('🌍 World Time',f'UTC: <t:{int(now.timestamp())}:F>\nIndia: <t:{int(now.timestamp())}:F>\nUse Discord’s local rendering to see the exact time in your timezone.'))
@@ -2862,10 +3179,255 @@ async def timer(ctx, duration: int, *, reminder='Your LiteBet timer has ended!')
     await asyncio.sleep(duration)
     try: await ctx.author.send(embed=emb('⏰ Timer',reminder))
     except discord.Forbidden: pass
+
+# ============================================================
+# REPORT — BEGGING DETECTION
+# ============================================================
+
+BEGGING_WORDS = [
+    'beg',
+    'begging',
+    'please give',
+    'pls give',
+    'plz give',
+    'free points',
+    'free point',
+    'give me points',
+    'give me point',
+    'give points',
+    'give point',
+    'can i have points',
+    'can i have point',
+    'can i get points',
+    'can i get point',
+    'send me points',
+    'send points',
+    'need points',
+    'need some points',
+    'give me money',
+    'send me money'
+]
+
+
 @bot.command()
-async def report(ctx, *, content: str):
-    begging=any(x in content.lower() for x in ['beg','please give','free points','can i have'])
-    await ctx.send(embed=emb('Report received','Potential begging detected and forwarded to staff.' if begging else 'Report received and forwarded to staff.',RED if begging else NAVY))
+async def report(ctx):
+
+    # ========================================================
+    # MUST REPLY TO A MESSAGE
+    # ========================================================
+
+    if not ctx.message.reference:
+
+        return await ctx.send(
+            embed=emb(
+                'Report',
+                (
+                    '❌ You must **reply to a message** '
+                    'with `.report`.\n\n'
+                    'Example: reply to the message and type:\n'
+                    '`.report`'
+                ),
+                RED
+            ),
+            delete_after=8
+        )
+
+    # ========================================================
+    # GET REPLIED MESSAGE
+    # ========================================================
+
+    try:
+
+        reported_message = await ctx.channel.fetch_message(
+            ctx.message.reference.message_id
+        )
+
+    except Exception:
+
+        return await ctx.send(
+            embed=emb(
+                'Report',
+                '❌ I could not find the message you reported.',
+                RED
+            ),
+            delete_after=8
+        )
+
+    # ========================================================
+    # MESSAGE CONTENT
+    # ========================================================
+
+    content = (
+        reported_message.content or ''
+    ).lower().strip()
+
+    # ========================================================
+    # CHECK BEGGING
+    # ========================================================
+
+    begging = any(
+        phrase in content
+        for phrase in BEGGING_WORDS
+    )
+
+    # ========================================================
+    # NOT BEGGING
+    # ========================================================
+
+    if not begging:
+
+        return await ctx.send(
+            embed=emb(
+                'Report Checked',
+                (
+                    'This does not violate any policy.\n\n'
+                    'No action was taken.'
+                ),
+                NAVY
+            ),
+            delete_after=8
+        )
+
+    # ========================================================
+    # DELETE OFFENDING MESSAGE
+    # ========================================================
+
+    try:
+
+        await reported_message.delete()
+
+    except discord.Forbidden:
+
+        pass
+
+    except discord.NotFound:
+
+        pass
+
+    except Exception as e:
+
+        print(
+            f'Report message delete error: {e}'
+        )
+
+    # ========================================================
+    # MUTE USER — 15 MINUTES
+    # ========================================================
+
+    mute_duration = timedelta(
+        minutes=15
+    )
+
+    muted = False
+
+    try:
+
+        await reported_message.author.timeout(
+            mute_duration,
+            reason='Begging for points'
+        )
+
+        muted = True
+
+    except discord.Forbidden:
+
+        print(
+            'Report: Missing permission to timeout user.'
+        )
+
+    except Exception as e:
+
+        print(
+            f'Report timeout error: {e}'
+        )
+
+    # ========================================================
+    # DELETE THE .REPORT COMMAND
+    # ========================================================
+
+    try:
+
+        await ctx.message.delete()
+
+    except Exception:
+
+        pass
+
+    # ========================================================
+    # DM USER
+    # ========================================================
+
+    try:
+
+        dm_embed = emb(
+            '🔇 You Have Been Muted',
+            (
+                'You have been muted for **15 minutes**.\n\n'
+                '**Reason:** Begging for points.\n\n'
+                'Please do not ask other users for free points, '
+                'currency, or balances.\n\n'
+                'You will automatically be unmuted after '
+                '**15 minutes**.'
+            ),
+            RED
+        )
+
+        await reported_message.author.send(
+            embed=dm_embed
+        )
+
+    except discord.Forbidden:
+
+        pass
+
+    except Exception as e:
+
+        print(
+            f'Report DM error: {e}'
+        )
+
+    # ========================================================
+    # CHANNEL NOTICE
+    # ========================================================
+
+    if muted:
+
+        notice = await ctx.channel.send(
+            embed=emb(
+                '🔇 User Muted',
+                (
+                    f'{reported_message.author.mention} '
+                    f'has been muted for **15 minutes**.\n\n'
+                    f'**Reason:** Begging for points.'
+                ),
+                RED
+            )
+        )
+
+    else:
+
+        notice = await ctx.channel.send(
+            embed=emb(
+                '⚠️ Moderation Failed',
+                (
+                    f'{reported_message.author.mention} '
+                    f'was detected begging for points, '
+                    f'but I could not apply the mute.\n\n'
+                    f'Please check that the bot has the '
+                    f'**Moderate Members** permission.'
+                ),
+                RED
+            )
+        )
+
+    # Automatically remove the notice after 8 seconds
+    await asyncio.sleep(8)
+
+    try:
+        await notice.delete()
+    except Exception:
+        pass
+
 
 class TttView(discord.ui.View):
     def __init__(self, first_id, second_id, amount):
