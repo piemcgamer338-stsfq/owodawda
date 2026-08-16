@@ -1291,12 +1291,11 @@ async def hilo(ctx, amount: Decimal):
 
 @bot.command()
 async def mines(ctx, amount: Decimal, bombs: int = 4):
-
-    if bombs < 1 or bombs > 24:
+    if bombs < 1 or bombs > 20:
         return await ctx.send(
             embed=emb(
                 'Invalid mine count',
-                'Choose from **1 to 24 bombs**.',
+                'Choose from **1 to 20 bombs**.',
                 RED
             )
         )
@@ -1304,61 +1303,79 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
     if not await require_game(ctx, amount):
         return
 
+    # --------------------------------------------------------
+    # MINES MULTIPLIER
+    # Higher bomb count = higher multiplier per safe tile
+    # Based on the probability of successfully hitting a safe tile.
+    # --------------------------------------------------------
+
     total_tiles = 25
     safe_tiles = total_tiles - bombs
 
-    # Random number of tiles revealed for this round
+    # Chance of hitting a safe tile
+    safe_probability = Decimal(safe_tiles) / Decimal(total_tiles)
+
+    # House edge
+    house_edge = Decimal("0.96")
+
+    # Multiplier for each revealed safe tile
+    tile_mult = (
+        (Decimal("1") / safe_probability) * house_edge
+    ).quantize(Decimal("0.01"))
+
+    # Don't allow an absurdly low multiplier
+    if tile_mult < Decimal("1.01"):
+        tile_mult = Decimal("1.01")
+
+    # --------------------------------------------------------
+    # RANDOM RESULT
+    # --------------------------------------------------------
+
     revealed = random.randint(
-        1,
+        0,
         min(8, safe_tiles)
     )
 
+    # Chance that the player survives all selected reveals
+    won = revealed > 0 and random.random() < float(
+        Decimal("0.90") ** revealed
+    )
+
     # --------------------------------------------------------
-    # MINES MULTIPLIER
-    # Based on the probability of surviving each safe pick.
-    # Includes a small house edge.
+    # COMPOUND MULTIPLIER
     # --------------------------------------------------------
 
-    HOUSE_EDGE = Decimal("0.99")
+    if revealed > 0:
+        mult = (
+            tile_mult ** revealed
+        ).quantize(Decimal("0.01"))
+    else:
+        mult = Decimal("1.00")
 
-    mult = Decimal("1")
+    # --------------------------------------------------------
+    # GRID
+    # --------------------------------------------------------
 
-    for i in range(revealed):
+    s, c, h = seed()
 
-        remaining_tiles = total_tiles - i
-        remaining_safe = safe_tiles - i
+    safe_positions = random.sample(
+        range(25),
+        min(revealed, safe_tiles)
+    )
 
-        if remaining_safe <= 0:
-            break
+    grid = []
 
-        # Probability that the next tile is safe
-        probability = (
-            Decimal(remaining_safe)
-            / Decimal(remaining_tiles)
-        )
+    for i in range(25):
+        if i in safe_positions:
+            grid.append("💎")
+        else:
+            grid.append("⬛")
 
-        # Fair multiplier for this step
-        step = Decimal("1") / probability
-
-        # Apply house edge
-        step *= HOUSE_EDGE
-
-        mult *= step
-
-    mult = mult.quantize(Decimal("0.01"))
+    grid_text = " ".join(grid)
 
     # --------------------------------------------------------
     # RESULT
     # --------------------------------------------------------
-
-    won = random.random() > 0.35
-
-    s, c, h = seed()
-
-    grid = " ".join(
-        "💎" if i < revealed else "⬛"
-        for i in range(total_tiles)
-    )
 
     profit = (
         amount * (mult - Decimal("1"))
@@ -1372,16 +1389,18 @@ async def mines(ctx, amount: Decimal, bombs: int = 4):
         amount,
         won,
         mult,
-        f'**Bet Amount:** {money(amount)}\n'
-        f'**Mines:** {bombs} 💣\n'
-        f'**Safe Tiles:** {safe_tiles} 💎\n'
-        f'**Safe Tiles Revealed:** {revealed}\n'
-        f'**Current Multiplier:** {mult:.2f}×\n'
-        f'**Profits:** {money(profit)} points\n\n'
-        f'{grid}\n\n'
-        f'🔒 Hash: `{h}`\n'
-        f'Server Seed: `{s}`\n'
-        f'Client Seed: `{c}`'
+        (
+            f'**Bet Amount:** {money(amount)}\n'
+            f'**Bombs:** {bombs} 💣\n'
+            f'**Safe Tiles:** {safe_tiles} 💎\n'
+            f'**Safe Tile Multiplier:** {tile_mult:.2f}×\n'
+            f'**Current Multiplier:** {mult:.2f}×\n'
+            f'**Profits:** {money(profit)} points\n\n'
+            f'{grid_text}\n\n'
+            f'🔒 Hash: `{h}`\n'
+            f'Server Seed: `{s}`\n'
+            f'Client Seed: `{c}`'
+        )
     )
     
 @bot.command()
