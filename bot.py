@@ -1768,6 +1768,7 @@ async def deposit(ctx):
     
 @bot.command(aliases=['bj'])
 async def blackjack(ctx, amount: Decimal):
+
     if not await require_game(ctx, amount):
         return
 
@@ -1798,16 +1799,16 @@ async def blackjack(ctx, amount: Decimal):
 
         return total
 
-    # -----------------------------
+    # =========================================================
     # DEAL INITIAL CARDS
-    # -----------------------------
+    # =========================================================
 
     player = [deck.pop(), deck.pop()]
     dealer = [deck.pop(), deck.pop()]
 
-    # -----------------------------
+    # =========================================================
     # BLACKJACK VIEW
-    # -----------------------------
+    # =========================================================
 
     class BlackjackView(discord.ui.View):
 
@@ -1830,14 +1831,13 @@ async def blackjack(ctx, amount: Decimal):
 
             return True
 
-        # -----------------------------
+        # =====================================================
         # CURRENT GAME EMBED
-        # -----------------------------
+        # =====================================================
 
         def game_embed(self):
 
             pv = hand_value(player)
-
             dealer_visible = card_value(dealer[0])
 
             return emb(
@@ -1856,16 +1856,15 @@ async def blackjack(ctx, amount: Decimal):
                 f'Choose **Hit** or **Stand**.'
             )
 
-        # -----------------------------
+        # =====================================================
         # IMAGE HANDS
-        # -----------------------------
+        # =====================================================
 
         def image_hands(self, finished=False):
 
             if finished:
                 return player, dealer
 
-            # Dealer's second card is hidden
             hidden_dealer = [
                 dealer[0],
                 ('?', '?')
@@ -1873,9 +1872,9 @@ async def blackjack(ctx, amount: Decimal):
 
             return player, hidden_dealer
 
-        # -----------------------------
-        # CREATE CURRENT IMAGE
-        # -----------------------------
+        # =====================================================
+        # CREATE GAME IMAGE
+        # =====================================================
 
         def create_game_image(self, finished=False):
 
@@ -1889,9 +1888,9 @@ async def blackjack(ctx, amount: Decimal):
                 image_dealer
             )
 
-        # -----------------------------
+        # =====================================================
         # UPDATE GAME
-        # -----------------------------
+        # =====================================================
 
         async def update_game(self, interaction):
 
@@ -1930,9 +1929,9 @@ async def blackjack(ctx, amount: Decimal):
                     view=self
                 )
 
-        # -----------------------------
+        # =====================================================
         # FINISH GAME
-        # -----------------------------
+        # =====================================================
 
         async def finish_game(self, interaction):
 
@@ -1940,7 +1939,6 @@ async def blackjack(ctx, amount: Decimal):
                 return
 
             self.finished = True
-
             self.stop()
 
             # Disable buttons
@@ -1949,9 +1947,9 @@ async def blackjack(ctx, amount: Decimal):
 
             pv = hand_value(player)
 
-            # -----------------------------
+            # =================================================
             # DEALER PLAYS
-            # -----------------------------
+            # =================================================
 
             while hand_value(dealer) < 17:
 
@@ -1962,9 +1960,9 @@ async def blackjack(ctx, amount: Decimal):
 
             dv = hand_value(dealer)
 
-            # -----------------------------
+            # =================================================
             # DETERMINE RESULT
-            # -----------------------------
+            # =================================================
 
             if pv > 21:
 
@@ -1983,6 +1981,7 @@ async def blackjack(ctx, amount: Decimal):
 
                 result_type = 'win'
 
+                # Normal Blackjack win = 1.95x
                 payout = (
                     amount * Decimal('1.95')
                 ).quantize(
@@ -2001,6 +2000,7 @@ async def blackjack(ctx, amount: Decimal):
 
                 result_type = 'win'
 
+                # Normal Blackjack win = 1.95x
                 payout = (
                     amount * Decimal('1.95')
                 ).quantize(
@@ -2030,6 +2030,8 @@ async def blackjack(ctx, amount: Decimal):
             else:
 
                 result_type = 'push'
+
+                # Push returns original bet
                 payout = Decimal('0')
 
                 title = 'Blackjack — Push!'
@@ -2041,46 +2043,38 @@ async def blackjack(ctx, amount: Decimal):
                     'was refunded.'
                 )
 
-                # Return original bet
+                # Refund original bet
                 await db.balance(
                     ctx.author.id,
                     amount
                 )
 
-            # -----------------------------
-            # PAY WINNER
-            # -----------------------------
-
-            if result_type == 'win':
-
-                await db.balance(
-                    ctx.author.id,
-                    payout
-                )
-
-            # -----------------------------
-            # DATABASE RECORD
-            # -----------------------------
+            # =================================================
+            # RECORD RESULT
+            # =================================================
+            #
+            # IMPORTANT:
+            # db.record() already credits the payout for wins.
+            #
+            # DO NOT call db.balance(payout) here.
+            #
+            # =================================================
 
             await db.record(
                 ctx.author.id,
                 'Blackjack',
                 amount,
                 result_type,
-                payout
-                if result_type == 'win'
-                else Decimal('0')
+                payout if result_type == 'win' else Decimal('0')
             )
 
-            # -----------------------------
+            # =================================================
             # FINAL IMAGE
-            # -----------------------------
+            # =================================================
 
             try:
 
-                image_path = self.create_game_image(
-                    True
-                )
+                image_path = self.create_game_image(True)
 
                 file = discord.File(
                     image_path,
@@ -2126,8 +2120,8 @@ async def blackjack(ctx, amount: Decimal):
                         title,
 
                         f'**Bet:** {money(amount)} points\n\n'
-                        f'🃏 Your total: **{pv}**\n'
-                        f'🎴 Dealer total: **{dv}**\n\n'
+                        f'🃏 **Your total:** `{pv}`\n'
+                        f'🎴 **Dealer total:** `{dv}`\n\n'
                         f'{result}',
 
                         colour
@@ -2135,9 +2129,9 @@ async def blackjack(ctx, amount: Decimal):
                     view=None
                 )
 
-        # -----------------------------
+        # =====================================================
         # HIT
-        # -----------------------------
+        # =====================================================
 
         @discord.ui.button(
             label='Hit',
@@ -2146,17 +2140,20 @@ async def blackjack(ctx, amount: Decimal):
         )
         async def hit(
             self,
-            interaction,
-            button
+            interaction: discord.Interaction,
+            button: discord.ui.Button
         ):
 
             if self.finished:
                 return
 
             if not deck:
-                return await self.finish_game(
+
+                await self.finish_game(
                     interaction
                 )
+
+                return
 
             player.append(
                 deck.pop()
@@ -2164,7 +2161,7 @@ async def blackjack(ctx, amount: Decimal):
 
             pv = hand_value(player)
 
-            # Bust or 21 = automatically finish
+            # Automatically finish on bust or 21
             if pv >= 21:
 
                 await self.finish_game(
@@ -2177,9 +2174,9 @@ async def blackjack(ctx, amount: Decimal):
                 interaction
             )
 
-        # -----------------------------
+        # =====================================================
         # STAND
-        # -----------------------------
+        # =====================================================
 
         @discord.ui.button(
             label='Stand',
@@ -2188,8 +2185,8 @@ async def blackjack(ctx, amount: Decimal):
         )
         async def stand(
             self,
-            interaction,
-            button
+            interaction: discord.Interaction,
+            button: discord.ui.Button
         ):
 
             if self.finished:
@@ -2199,9 +2196,9 @@ async def blackjack(ctx, amount: Decimal):
                 interaction
             )
 
-        # -----------------------------
+        # =====================================================
         # TIMEOUT
-        # -----------------------------
+        # =====================================================
 
         async def on_timeout(self):
 
@@ -2209,7 +2206,6 @@ async def blackjack(ctx, amount: Decimal):
                 return
 
             self.finished = True
-
             self.stop()
 
             for button in self.children:
@@ -2238,9 +2234,9 @@ async def blackjack(ctx, amount: Decimal):
                     f'Blackjack timeout error: {e}'
                 )
 
-    # -----------------------------
+    # =========================================================
     # NATURAL BLACKJACK CHECK
-    # -----------------------------
+    # =========================================================
 
     player_blackjack = (
         len(player) == 2
@@ -2252,25 +2248,23 @@ async def blackjack(ctx, amount: Decimal):
         and hand_value(dealer) == 21
     )
 
-    # -----------------------------
+    # =========================================================
     # NATURAL BLACKJACK
-    # -----------------------------
+    # =========================================================
 
     if player_blackjack or dealer_blackjack:
 
         if player_blackjack and not dealer_blackjack:
 
+            # Natural Blackjack = exactly 2.00x
             payout = (
                 amount * Decimal('2.00')
             ).quantize(
                 Decimal('0.01')
             )
 
-            await db.balance(
-                ctx.author.id,
-                payout
-            )
-
+            # db.record() credits payout.
+            # DO NOT call db.balance() here.
             await db.record(
                 ctx.author.id,
                 'Blackjack',
@@ -2306,6 +2300,7 @@ async def blackjack(ctx, amount: Decimal):
 
         else:
 
+            # Both Blackjack = refund original bet
             await db.balance(
                 ctx.author.id,
                 amount
@@ -2328,7 +2323,10 @@ async def blackjack(ctx, amount: Decimal):
                 'were refunded.'
             )
 
-        # Final natural blackjack image
+        # =====================================================
+        # NATURAL BLACKJACK IMAGE
+        # =====================================================
+
         try:
 
             image_path = blackjack_card(
@@ -2383,9 +2381,9 @@ async def blackjack(ctx, amount: Decimal):
                 )
             )
 
-    # -----------------------------
+    # =========================================================
     # START NORMAL GAME
-    # -----------------------------
+    # =========================================================
 
     view = BlackjackView()
 
