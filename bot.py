@@ -2699,13 +2699,502 @@ async def hilo(ctx, amount: Decimal):
     e=view.current_embed(); image=hilo_card(view.rank,view.suit); e.set_image(url=f'attachment://{image.name}')
     await message.edit(embed=e,attachments=[discord.File(image)],view=view); view.message=message
 
-@bot.command()
-async def mines(ctx, amount: Decimal, bombs: int=4):
-    if bombs<1 or bombs>20: return await ctx.send(embed=emb('Invalid mine count','Choose from 1 to 20 bombs.',RED))
-    if not await require_game(ctx,amount): return
-    s,c,h=seed(); view=MinesView(ctx.author.id,amount,bombs,s,c,h); message=await ctx.send(embed=view.game_embed(),view=view); view.message=message; ACTIVE_MINES[message.id]=view
-    await message.add_reaction('\U0001F4B0')
+# ============================================================
+# MINES
+# ============================================================
 
+MINES_DIAMOND = '<:diamond:1538364736251629640>'
+MINES_BOMB = '<:bomb:1538364767201271808>'
+
+
+class MinesView(discord.ui.View):
+    def __init__(self, author_id, amount, bombs, server, client, public_hash):
+        super().__init__(timeout=120)
+
+        self.author_id = author_id
+        self.amount = amount
+        self.bombs = bombs
+        self.safe_tiles = 25 - bombs
+
+        self.mines = set(random.sample(range(25), bombs))
+        self.revealed_tiles = set()
+
+        self.revealed = 0
+
+        self.server = server
+        self.client = client
+        self.public_hash = public_hash
+
+        self.message = None
+        self.finished = False
+
+        for i in range(25):
+            button = discord.ui.Button(
+                label='?',
+                style=discord.ButtonStyle.secondary,
+                row=i // 5,
+                custom_id=f'mine:{i}'
+            )
+
+            button.callback = self.pick
+            self.add_item(button)
+
+    # --------------------------------------------------------
+    # MULTIPLIER
+    # --------------------------------------------------------
+
+    def multiplier(self):
+        """
+        Multiplier based on BOTH:
+        - number of bombs
+        - number of diamonds revealed
+
+        More bombs = higher multiplier per safe tile.
+        """
+
+        if self.revealed <= 0:
+            return Decimal('1.00')
+
+        # Probability of successfully revealing each safe tile.
+        #
+        # 1 bomb  = very low risk
+        # 20 bombs = extremely high risk
+        #
+        # The multiplier grows faster as bomb count increases.
+
+        multiplier = Decimal('1.00')
+
+        for i in range(self.revealed):
+            remaining_safe = self.safe_tiles - i
+            remaining_tiles = 25 - i
+
+            if remaining_safe <= 0:
+                break
+
+            # Fair probability multiplier with a small house edge.
+            step = (
+                Decimal(remaining_tiles)
+                / Decimal(remaining_safe)
+            ) * Decimal('0.96')
+
+            multiplier *= step
+
+        return multiplier.quantize(Decimal('0.01'))
+
+    # --------------------------------------------------------
+    # GRID
+    # --------------------------------------------------------
+
+    def grid_text(self, reveal_all=False):
+        rows = []
+
+        for row in range(5):
+            cells = []
+
+            for col in range(5):
+                index = row * 5 + col
+
+                if reveal_all:
+                    if index in self.mines:
+                        cells.append(MINES_BOMB)
+                    else:
+                        cells.append(MINES_DIAMOND)
+
+                elif index in self.revealed_tiles:
+                    cells.append(MINES_DIAMOND)
+
+                else:
+                    cells.append('⬛')
+
+            rows.append(' '.join(cells))
+
+        return '\n'.join(rows)
+
+    # --------------------------------------------------------
+    # GAME EMBED
+    # --------------------------------------------------------
+
+    def game_embed(self, extra='Choose a tile to reveal a diamond.'):
+        mult = self.multiplier()
+
+        profit = (
+            self.amount * (mult - Decimal('1'))
+        ).quantize(Decimal('0.01'))
+
+        return emb(
+            '💣 Mines',
+            (
+                f'**Bet Amount:** {money(self.amount)} points\n'
+                f'**Current Multiplier:** `{mult:.2f}×`\n'
+                f'**Profit:** `{money(profit)} points`\n\n'
+
+                f'**Mines:** {self.bombs} {MINES_BOMB}\n'
+                f'**Diamonds:** {self.safe_tiles} {MINES_DIAMOND}\n'
+                f'**Revealed:** {self.revealed}/{self.safe_tiles}\n\n'
+
+                f'{self.grid_text()}\n\n'
+
+                f'{extra}\n\n'
+                f'🔒 **Provably Fair**\n'
+                f'Public Hash: `{self.public_hash}`'
+            )
+        )
+
+    # --------------------------------------------------------
+    # PLAYER CHECK
+    # --------------------------------------------------------
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                'Only the player who started this Mines game can reveal tiles.',
+                ephemeral=True
+            )
+            return False
+
+        return True
+
+    # --------------------------------------------------------
+    # REVEAL TILE
+    # --------------------------------------------------------
+
+    async def pick(self, interaction):
+
+        if self.finished:
+            return
+
+        index = int(
+            interaction.data['custom_id'].split(':')[1]
+        )
+
+        button = next(
+            x for x in self.children
+            if x.custom_id == interaction.data['custom_id']
+        )
+
+        # ----------------------------------------------------
+        # BOMB
+        # ----------------------------------------------------
+
+        if index in self.mines:
+
+            self.finished = True
+            self.stop()
+
+            button.disabled = True
+            button.label = '💣'
+            button.emoji = None
+            button.style = discord.ButtonStyle.danger
+
+            # Reveal the entire board
+            for x in self.children:
+
+                tile_index = int(
+                    x.custom_id.split(':')[1]
+                )
+
+                x.disabled = True
+
+                if tile_index in self.mines:
+                    x.label = '💣'
+                    x.emoji = None
+                    x.style = discord.ButtonStyle.danger
+
+                elif tile_index in self.revealed_tiles:
+                    x.label = '💎'
+                    x.emoji = None
+                    x.style = discord.ButtonStyle.success
+
+                else:
+                    x.label = ' '
+                    x.style = discord.ButtonStyle.secondary
+
+            await db.record(
+                self.author_id,
+                'Mines',
+                self.amount,
+                'loss',
+                Decimal('0')
+            )
+
+            ACTIVE_MINES.pop(
+                interaction.message.id,
+                None
+            )
+
+            loss_embed = emb(
+                '💣 Mines — You Lost',
+                (
+                    f'**Bet:** {money(self.amount)} points\n'
+                    f'**Diamonds Found:** {self.revealed}\n'
+                    f'**Last Multiplier:** `{self.multiplier():.2f}×`\n\n'
+
+                    f'{self.grid_text(reveal_all=True)}\n\n'
+
+                    f'💥 **You hit a mine!**\n'
+                    f'Better luck next time.\n\n'
+
+                    f'🔒 **Provably Fair**\n'
+                    f'Public Hash: `{self.public_hash}`\n'
+                    f'Server Seed: `{self.server}`\n'
+                    f'Client Seed: `{self.client}`'
+                ),
+                RED
+            )
+
+            return await interaction.response.edit_message(
+                embed=loss_embed,
+                view=self
+            )
+
+        # ----------------------------------------------------
+        # DIAMOND
+        # ----------------------------------------------------
+
+        self.revealed += 1
+        self.revealed_tiles.add(index)
+
+        button.disabled = True
+        button.label = '💎'
+        button.emoji = None
+        button.style = discord.ButtonStyle.success
+
+        # ----------------------------------------------------
+        # ALL SAFE TILES
+        # ----------------------------------------------------
+
+        if self.revealed >= self.safe_tiles:
+
+            self.finished = True
+            self.stop()
+
+            payout = (
+                self.amount * self.multiplier()
+            ).quantize(Decimal('0.01'))
+
+            await db.record(
+                self.author_id,
+                'Mines',
+                self.amount,
+                'win',
+                payout
+            )
+
+            ACTIVE_MINES.pop(
+                interaction.message.id,
+                None
+            )
+
+            for x in self.children:
+                x.disabled = True
+
+            win_embed = result_embed(
+                'Mines',
+                self.amount,
+                True,
+                self.multiplier(),
+                (
+                    f'You revealed all **{self.safe_tiles} diamonds**!\n\n'
+                    f'{self.grid_text(reveal_all=True)}\n\n'
+                    f'🔒 Public Hash: `{self.public_hash}`'
+                )
+            )
+
+            return await interaction.response.edit_message(
+                embed=win_embed,
+                view=self
+            )
+
+        # ----------------------------------------------------
+        # CONTINUE
+        # ----------------------------------------------------
+
+        await interaction.response.edit_message(
+            embed=self.game_embed(
+                f'{MINES_DIAMOND} **Diamond found!** '
+                f'You can cash out at `{self.multiplier():.2f}×`.'
+            ),
+            view=self
+        )
+
+    # --------------------------------------------------------
+    # CASH OUT
+    # --------------------------------------------------------
+
+    @discord.ui.button(
+        label='Cash Out',
+        emoji='💰',
+        style=discord.ButtonStyle.success,
+        row=4
+    )
+    async def cashout(self, interaction, button):
+
+        if self.finished:
+            return
+
+        if self.revealed <= 0:
+            return await interaction.response.send_message(
+                'You must reveal at least one diamond before cashing out.',
+                ephemeral=True
+            )
+
+        self.finished = True
+        self.stop()
+
+        multiplier = self.multiplier()
+
+        payout = (
+            self.amount * multiplier
+        ).quantize(Decimal('0.01'))
+
+        await db.record(
+            self.author_id,
+            'Mines',
+            self.amount,
+            'win',
+            payout
+        )
+
+        ACTIVE_MINES.pop(
+            interaction.message.id,
+            None
+        )
+
+        for x in self.children:
+            x.disabled = True
+
+        result = result_embed(
+            'Mines',
+            self.amount,
+            True,
+            multiplier,
+            (
+                f'💎 Diamonds revealed: **{self.revealed}**\n'
+                f'💰 Cashout multiplier: **{multiplier:.2f}×**\n\n'
+                f'🔒 Public Hash: `{self.public_hash}`\n'
+                f'Server Seed: `{self.server}`\n'
+                f'Client Seed: `{self.client}`'
+            )
+        )
+
+        await interaction.response.edit_message(
+            embed=result,
+            view=self
+        )
+
+    # --------------------------------------------------------
+    # TIMEOUT
+    # --------------------------------------------------------
+
+    async def on_timeout(self):
+
+        if self.finished:
+            return
+
+        self.finished = True
+
+        if self.revealed > 0:
+
+            multiplier = self.multiplier()
+
+            payout = (
+                self.amount * multiplier
+            ).quantize(Decimal('0.01'))
+
+            await db.record(
+                self.author_id,
+                'Mines',
+                self.amount,
+                'win',
+                payout
+            )
+
+            if self.message:
+                ACTIVE_MINES.pop(
+                    self.message.id,
+                    None
+                )
+
+                await self.message.edit(
+                    embed=result_embed(
+                        'Mines',
+                        self.amount,
+                        True,
+                        multiplier,
+                        (
+                            f'Automatically cashed out after '
+                            f'**{self.revealed} diamonds**.\n\n'
+                            f'Final multiplier: **{multiplier:.2f}×**'
+                        )
+                    ),
+                    view=None
+                )
+
+        elif self.message:
+
+            await db.record(
+                self.author_id,
+                'Mines',
+                self.amount,
+                'loss',
+                Decimal('0')
+            )
+
+            ACTIVE_MINES.pop(
+                self.message.id,
+                None
+            )
+
+            await self.message.edit(
+                embed=result_embed(
+                    'Mines',
+                    self.amount,
+                    False,
+                    Decimal('0'),
+                    'No diamond was revealed before the game timed out.'
+                ),
+                view=None
+            )
+
+
+# ============================================================
+# MINES COMMAND
+# ============================================================
+
+@bot.command()
+async def mines(ctx, amount: Decimal, bombs: int = 4):
+
+    if bombs < 1 or bombs > 20:
+        return await ctx.send(
+            embed=emb(
+                'Invalid mine count',
+                'Choose from **1 to 20 bombs**.',
+                RED
+            )
+        )
+
+    if not await require_game(ctx, amount):
+        return
+
+    server, client, public_hash = seed()
+
+    view = MinesView(
+        ctx.author.id,
+        amount,
+        bombs,
+        server,
+        client,
+        public_hash
+    )
+
+    message = await ctx.send(
+        embed=view.game_embed(),
+        view=view
+    )
+
+    view.message = message
+
+    ACTIVE_MINES[message.id] = view
 @bot.command()
 async def rps(ctx, member: discord.Member, amount: Decimal):
     if member.bot or member==ctx.author or amount<=0: return await ctx.send(embed=emb('Invalid challenge','Choose another member and a positive bet.',RED))
