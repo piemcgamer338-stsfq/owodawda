@@ -707,74 +707,6 @@ LP_RANKS = [
     'K', 'A'
 ]
 
-LP_SUITS = ['S', 'H', 'D', 'C']
-
-
-# ------------------------------------------------------------
-# PAYOUT MULTIPLIERS
-# ------------------------------------------------------------
-
-LP_MULTIPLIERS = {
-    '2': Decimal('0.00'),
-    '3': Decimal('0.00'),
-    '4': Decimal('0.00'),
-    '5': Decimal('0.00'),
-
-    '6': Decimal('0.50'),
-    '7': Decimal('0.50'),
-    '8': Decimal('0.50'),
-
-    '9': Decimal('1.40'),
-    '10': Decimal('1.40'),
-    'J': Decimal('1.40'),
-    'Q': Decimal('1.40'),
-
-    'K': Decimal('2.00'),
-
-    'A': Decimal('3.00')
-}
-
-
-# ------------------------------------------------------------
-# CARD DISPLAY
-# ------------------------------------------------------------
-
-LP_SUIT_NAMES = {
-    'S': '♠',
-    'H': '♥',
-    'D': '♦',
-    'C': '♣'
-}
-
-
-def lp_card_name(card):
-    rank, suit = card
-
-    return (
-        f'**{rank}{LP_SUIT_NAMES[suit]}**'
-    )
-
-
-# ============================================================
-# LOOT PACKET
-# ============================================================
-
-LP_RANKS = [
-    '2',
-    '3',
-    '4',
-    '5',
-    '6',
-    '7',
-    '8',
-    '9',
-    '10',
-    'J',
-    'Q',
-    'K',
-    'A'
-]
-
 LP_SUITS = [
     'S',
     'H',
@@ -789,29 +721,84 @@ LP_SUITS = [
 
 LP_MULTIPLIERS = {
 
-    # 2 - 5
+    # 2 - 5 = 0x
     '2': Decimal('0.00'),
     '3': Decimal('0.00'),
     '4': Decimal('0.00'),
     '5': Decimal('0.00'),
 
-    # 6 - 8
+    # 6 - 8 = 0.50x
     '6': Decimal('0.50'),
     '7': Decimal('0.50'),
     '8': Decimal('0.50'),
 
-    # 9 - Q
+    # 9 - Q = 1.40x
     '9': Decimal('1.40'),
     '10': Decimal('1.40'),
     'J': Decimal('1.40'),
     'Q': Decimal('1.40'),
 
-    # K
+    # K = 2.00x
     'K': Decimal('2.00'),
 
-    # A
+    # A = 3.00x
     'A': Decimal('3.00')
 }
+
+
+# ============================================================
+# LOOT PACKET CHANCES
+#
+# K = 10%
+# A = 10%
+# Remaining 11 ranks share the remaining 80%
+#
+# Each normal rank:
+# 80 / 11 = approximately 7.2727%
+# ============================================================
+
+LP_NORMAL_CHANCE = Decimal('80') / Decimal('11')
+
+LP_CHANCES = {
+
+    '2': LP_NORMAL_CHANCE,
+    '3': LP_NORMAL_CHANCE,
+    '4': LP_NORMAL_CHANCE,
+    '5': LP_NORMAL_CHANCE,
+
+    '6': LP_NORMAL_CHANCE,
+    '7': LP_NORMAL_CHANCE,
+    '8': LP_NORMAL_CHANCE,
+
+    '9': LP_NORMAL_CHANCE,
+    '10': LP_NORMAL_CHANCE,
+    'J': LP_NORMAL_CHANCE,
+    'Q': LP_NORMAL_CHANCE,
+
+    'K': Decimal('10.00'),
+    'A': Decimal('10.00')
+}
+
+
+# ============================================================
+# CARD DISPLAY
+# ============================================================
+
+LP_SUIT_NAMES = {
+    'S': '♠',
+    'H': '♥',
+    'D': '♦',
+    'C': '♣'
+}
+
+
+def lp_card_name(card):
+
+    rank, suit = card
+
+    return (
+        f'**{rank}{LP_SUIT_NAMES[suit]}**'
+    )
 
 
 # ============================================================
@@ -839,10 +826,6 @@ def lp_find_card(rank, suit):
         suit
     )
 
-    # --------------------------------------------------------
-    # COMMON LOCATIONS
-    # --------------------------------------------------------
-
     possible_paths = [
 
         os.path.join(
@@ -867,20 +850,20 @@ def lp_find_card(rank, suit):
     for path in possible_paths:
 
         if os.path.isfile(path):
+
             return path
 
-    # --------------------------------------------------------
-    # SEARCH ASSETS RECURSIVELY
-    # --------------------------------------------------------
+    # Search assets recursively
+    if os.path.isdir('assets'):
 
-    for root, dirs, files in os.walk('assets'):
+        for root, dirs, files in os.walk('assets'):
 
-        if filename in files:
+            if filename in files:
 
-            return os.path.join(
-                root,
-                filename
-            )
+                return os.path.join(
+                    root,
+                    filename
+                )
 
     return None
 
@@ -938,7 +921,9 @@ def create_lootpacket_image(
                 path
             ).convert('RGBA')
 
-            loaded_cards.append(card)
+            loaded_cards.append(
+                card
+            )
 
         except Exception as e:
 
@@ -953,7 +938,7 @@ def create_lootpacket_image(
         return None
 
     # --------------------------------------------------------
-    # RESIZE CARDS
+    # CARD SIZE
     # --------------------------------------------------------
 
     card_width = 220
@@ -971,7 +956,6 @@ def create_lootpacket_image(
             Image.Resampling.LANCZOS
         )
 
-        # Put each card onto a fixed-size canvas
         canvas = Image.new(
             'RGBA',
             (
@@ -1029,7 +1013,7 @@ def create_lootpacket_image(
     )
 
     # --------------------------------------------------------
-    # TITLE
+    # FONTS
     # --------------------------------------------------------
 
     try:
@@ -1054,14 +1038,16 @@ def create_lootpacket_image(
 
         small_font = ImageFont.load_default()
 
-    title = '🃏 LOOT PACKET'
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
 
     draw.text(
         (
             width // 2,
             28
         ),
-        title,
+        'LOOT PACKET',
         fill=(255, 255, 255),
         font=title_font,
         anchor='ma'
@@ -1104,17 +1090,17 @@ def create_lootpacket_image(
         )
 
     # --------------------------------------------------------
-    # SAVE IMAGE
+    # SAVE
     # --------------------------------------------------------
-
-    output = os.path.join(
-        'assets',
-        'lootpacket_result.png'
-    )
 
     os.makedirs(
         'assets',
         exist_ok=True
+    )
+
+    output = os.path.join(
+        'assets',
+        'lootpacket_result.png'
     )
 
     image.save(
@@ -1122,6 +1108,49 @@ def create_lootpacket_image(
     )
 
     return output
+
+
+# ============================================================
+# LPCHANCE
+# ============================================================
+
+@bot.command()
+async def lpchance(ctx):
+
+    normal = LP_NORMAL_CHANCE
+
+    chance_text = (
+        '**Card Chances**\n\n'
+
+        f'`2`  — `{normal:.2f}%` → `0.00x`\n'
+        f'`3`  — `{normal:.2f}%` → `0.00x`\n'
+        f'`4`  — `{normal:.2f}%` → `0.00x`\n'
+        f'`5`  — `{normal:.2f}%` → `0.00x`\n\n'
+
+        f'`6`  — `{normal:.2f}%` → `0.50x`\n'
+        f'`7`  — `{normal:.2f}%` → `0.50x`\n'
+        f'`8`  — `{normal:.2f}%` → `0.50x`\n\n'
+
+        f'`9`  — `{normal:.2f}%` → `1.40x`\n'
+        f'`10` — `{normal:.2f}%` → `1.40x`\n'
+        f'`J`  — `{normal:.2f}%` → `1.40x`\n'
+        f'`Q`  — `{normal:.2f}%` → `1.40x`\n\n'
+
+        f'`K`  — `10.00%` → `2.00x`\n'
+        f'`A`  — `10.00%` → `3.00x`\n\n'
+
+        '━━━━━━━━━━━━━━━━━━━━\n'
+        '**3 cards are drawn independently.**\n'
+        'The displayed chances are the actual chances used by the game.'
+    )
+
+    await ctx.send(
+        embed=emb(
+            '🃏 Loot Packet — Chances',
+            chance_text,
+            GREEN
+        )
+    )
 
 
 # ============================================================
@@ -1188,7 +1217,7 @@ async def lootpacket(
     )
 
     # ========================================================
-    # 3 SECOND REVEAL
+    # WAIT 3 SECONDS
     # ========================================================
 
     await asyncio.sleep(
@@ -1196,54 +1225,25 @@ async def lootpacket(
     )
 
     # ========================================================
-    # CARD PROBABILITIES
-    #
-    # A  = 10%
-    # K  = 10%
-    # Other 11 ranks share 80%
-    #
-    # Each normal rank = approximately 7.27%
+    # DRAW CARDS
     # ========================================================
 
-    normal_rank_weight = (
-        80 / 11
+    ranks = list(
+        LP_CHANCES.keys()
     )
 
-    rank_weights = {
-
-        '2': normal_rank_weight,
-        '3': normal_rank_weight,
-        '4': normal_rank_weight,
-        '5': normal_rank_weight,
-
-        '6': normal_rank_weight,
-        '7': normal_rank_weight,
-        '8': normal_rank_weight,
-
-        '9': normal_rank_weight,
-        '10': normal_rank_weight,
-        'J': normal_rank_weight,
-        'Q': normal_rank_weight,
-
-        'K': 10,
-        'A': 10
-    }
-
-    # ========================================================
-    # DRAW 3 CARDS
-    # ========================================================
+    weights = [
+        float(LP_CHANCES[rank])
+        for rank in ranks
+    ]
 
     cards = []
 
     for _ in range(3):
 
         rank = random.choices(
-            list(
-                rank_weights.keys()
-            ),
-            weights=list(
-                rank_weights.values()
-            ),
+            ranks,
+            weights=weights,
             k=1
         )[0]
 
@@ -1259,7 +1259,7 @@ async def lootpacket(
         )
 
     # ========================================================
-    # CALCULATE EACH CARD
+    # CALCULATE MULTIPLIERS
     # ========================================================
 
     multipliers = []
@@ -1267,25 +1267,24 @@ async def lootpacket(
     for rank, suit in cards:
 
         multipliers.append(
-            LP_MULTIPLIERS[
-                rank
-            ]
+            LP_MULTIPLIERS[rank]
         )
 
     # ========================================================
     # TOTAL MULTIPLIER
+    #
+    # Each card contributes its own multiplier.
+    #
+    # Example:
+    # A + K + 5
+    # 3.00 + 2.00 + 0.00 = 5.00x
     # ========================================================
 
     total_multiplier = sum(
         multipliers,
         Decimal('0.00')
-    )
-
-    total_multiplier = (
-        total_multiplier
-        .quantize(
-            Decimal('0.01')
-        )
+    ).quantize(
+        Decimal('0.01')
     )
 
     # ========================================================
@@ -1299,10 +1298,6 @@ async def lootpacket(
         Decimal('0.01')
     )
 
-    # ========================================================
-    # WIN / LOSS
-    # ========================================================
-
     won = (
         payout > Decimal('0')
     )
@@ -1313,10 +1308,18 @@ async def lootpacket(
 
     if payout > Decimal('0'):
 
-        await db.balance(
-            ctx.author.id,
-            payout
-        )
+        try:
+
+            await db.balance(
+                ctx.author.id,
+                payout
+            )
+
+        except Exception as e:
+
+            print(
+                f'Loot Packet balance error: {e}'
+            )
 
     # ========================================================
     # RECORD GAME
@@ -1361,19 +1364,9 @@ async def lootpacket(
     # CARD TEXT
     # ========================================================
 
-    suit_symbols = {
-        'S': '♠',
-        'H': '♥',
-        'D': '♦',
-        'C': '♣'
-    }
-
     card_lines = []
 
-    for (
-        card,
-        multiplier
-    ) in zip(
+    for card, multiplier in zip(
         cards,
         multipliers
     ):
@@ -1381,7 +1374,7 @@ async def lootpacket(
         rank, suit = card
 
         card_lines.append(
-            f'**{rank}{suit_symbols[suit]}** '
+            f'**{rank}{LP_SUIT_NAMES[suit]}** '
             f'— `{multiplier:.2f}x`'
         )
 
@@ -1405,7 +1398,7 @@ async def lootpacket(
     else:
 
         result_message = (
-            '💀 **No winning cards. '
+            '💀 **No payout this time. '
             'Better luck next time!**'
         )
 
@@ -1424,7 +1417,7 @@ async def lootpacket(
             f'🎴 **Cards Drawn**\n'
             f'{card_text}\n\n'
 
-            f'━━━━━━━━━━━━━━━━━━\n\n'
+            f'━━━━━━━━━━━━━━━━━━━━\n\n'
 
             f'**Total Multiplier:** '
             f'`{total_multiplier:.2f}x`\n'
@@ -1443,7 +1436,7 @@ async def lootpacket(
     )
 
     # ========================================================
-    # CREATE ACTUAL 3-CARD IMAGE
+    # CREATE RESULT IMAGE
     # ========================================================
 
     image_path = None
@@ -1462,11 +1455,12 @@ async def lootpacket(
         )
 
     # ========================================================
-    # SEND RESULT
+    # SEND RESULT WITH IMAGE
     # ========================================================
 
-    if image_path and os.path.isfile(
+    if (
         image_path
+        and os.path.isfile(image_path)
     ):
 
         try:
