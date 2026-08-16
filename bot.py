@@ -756,6 +756,375 @@ def lp_card_name(card):
 
 
 # ============================================================
+# LOOT PACKET
+# ============================================================
+
+LP_RANKS = [
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+    '10',
+    'J',
+    'Q',
+    'K',
+    'A'
+]
+
+LP_SUITS = [
+    'S',
+    'H',
+    'D',
+    'C'
+]
+
+
+# ============================================================
+# LOOT PACKET PAYOUTS
+# ============================================================
+
+LP_MULTIPLIERS = {
+
+    # 2 - 5
+    '2': Decimal('0.00'),
+    '3': Decimal('0.00'),
+    '4': Decimal('0.00'),
+    '5': Decimal('0.00'),
+
+    # 6 - 8
+    '6': Decimal('0.50'),
+    '7': Decimal('0.50'),
+    '8': Decimal('0.50'),
+
+    # 9 - Q
+    '9': Decimal('1.40'),
+    '10': Decimal('1.40'),
+    'J': Decimal('1.40'),
+    'Q': Decimal('1.40'),
+
+    # K
+    'K': Decimal('2.00'),
+
+    # A
+    'A': Decimal('3.00')
+}
+
+
+# ============================================================
+# CARD FILE HELPERS
+# ============================================================
+
+def lp_card_filename(rank, suit):
+
+    suit_names = {
+        'S': 'spades',
+        'H': 'hearts',
+        'D': 'diamonds',
+        'C': 'clubs'
+    }
+
+    return (
+        f'{rank}_of_{suit_names[suit]}.png'
+    )
+
+
+def lp_find_card(rank, suit):
+
+    filename = lp_card_filename(
+        rank,
+        suit
+    )
+
+    # --------------------------------------------------------
+    # COMMON LOCATIONS
+    # --------------------------------------------------------
+
+    possible_paths = [
+
+        os.path.join(
+            'assets',
+            filename
+        ),
+
+        os.path.join(
+            'assets',
+            'cards',
+            filename
+        ),
+
+        os.path.join(
+            'cards',
+            filename
+        ),
+
+        filename
+    ]
+
+    for path in possible_paths:
+
+        if os.path.isfile(path):
+            return path
+
+    # --------------------------------------------------------
+    # SEARCH ASSETS RECURSIVELY
+    # --------------------------------------------------------
+
+    for root, dirs, files in os.walk('assets'):
+
+        if filename in files:
+
+            return os.path.join(
+                root,
+                filename
+            )
+
+    return None
+
+
+# ============================================================
+# CREATE LOOT PACKET RESULT IMAGE
+# ============================================================
+
+def create_lootpacket_image(
+    cards,
+    username
+):
+
+    try:
+
+        from PIL import (
+            Image,
+            ImageDraw,
+            ImageFont
+        )
+
+    except Exception as e:
+
+        print(
+            f'Loot Packet Pillow error: {e}'
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # LOAD CARDS
+    # --------------------------------------------------------
+
+    loaded_cards = []
+
+    for rank, suit in cards:
+
+        path = lp_find_card(
+            rank,
+            suit
+        )
+
+        if not path:
+
+            print(
+                f'Loot Packet card not found: '
+                f'{lp_card_filename(rank, suit)}'
+            )
+
+            return None
+
+        try:
+
+            card = Image.open(
+                path
+            ).convert('RGBA')
+
+            loaded_cards.append(card)
+
+        except Exception as e:
+
+            print(
+                f'Loot Packet card load error: {e}'
+            )
+
+            return None
+
+    if len(loaded_cards) != 3:
+
+        return None
+
+    # --------------------------------------------------------
+    # RESIZE CARDS
+    # --------------------------------------------------------
+
+    card_width = 220
+    card_height = 320
+
+    resized = []
+
+    for card in loaded_cards:
+
+        card.thumbnail(
+            (
+                card_width,
+                card_height
+            ),
+            Image.Resampling.LANCZOS
+        )
+
+        # Put each card onto a fixed-size canvas
+        canvas = Image.new(
+            'RGBA',
+            (
+                card_width,
+                card_height
+            ),
+            (255, 255, 255, 255)
+        )
+
+        x = (
+            card_width - card.width
+        ) // 2
+
+        y = (
+            card_height - card.height
+        ) // 2
+
+        canvas.alpha_composite(
+            card,
+            (
+                x,
+                y
+            )
+        )
+
+        resized.append(
+            canvas
+        )
+
+    # --------------------------------------------------------
+    # RESULT CANVAS
+    # --------------------------------------------------------
+
+    gap = 30
+
+    width = (
+        card_width * 3
+        + gap * 2
+        + 80
+    )
+
+    height = 470
+
+    image = Image.new(
+        'RGB',
+        (
+            width,
+            height
+        ),
+        (18, 20, 24)
+    )
+
+    draw = ImageDraw.Draw(
+        image
+    )
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    try:
+
+        title_font = ImageFont.truetype(
+            'arial.ttf',
+            30
+        )
+
+    except Exception:
+
+        title_font = ImageFont.load_default()
+
+    try:
+
+        small_font = ImageFont.truetype(
+            'arial.ttf',
+            20
+        )
+
+    except Exception:
+
+        small_font = ImageFont.load_default()
+
+    title = '🃏 LOOT PACKET'
+
+    draw.text(
+        (
+            width // 2,
+            28
+        ),
+        title,
+        fill=(255, 255, 255),
+        font=title_font,
+        anchor='ma'
+    )
+
+    draw.text(
+        (
+            width // 2,
+            70
+        ),
+        username,
+        fill=(170, 175, 185),
+        font=small_font,
+        anchor='ma'
+    )
+
+    # --------------------------------------------------------
+    # PLACE CARDS
+    # --------------------------------------------------------
+
+    start_x = 40
+    y = 115
+
+    for i, card in enumerate(resized):
+
+        x = (
+            start_x
+            + i * (
+                card_width + gap
+            )
+        )
+
+        image.paste(
+            card,
+            (
+                x,
+                y
+            ),
+            card
+        )
+
+    # --------------------------------------------------------
+    # SAVE IMAGE
+    # --------------------------------------------------------
+
+    output = os.path.join(
+        'assets',
+        'lootpacket_result.png'
+    )
+
+    os.makedirs(
+        'assets',
+        exist_ok=True
+    )
+
+    image.save(
+        output
+    )
+
+    return output
+
+
+# ============================================================
 # LOOT PACKET COMMAND
 # ============================================================
 
@@ -767,9 +1136,9 @@ async def lootpacket(
     amount: Decimal
 ):
 
-    # --------------------------------------------------------
+    # ========================================================
     # CHECK BET
-    # --------------------------------------------------------
+    # ========================================================
 
     if not await require_game(
         ctx,
@@ -777,34 +1146,39 @@ async def lootpacket(
     ):
         return
 
-    # --------------------------------------------------------
+    # ========================================================
     # PROVABLY FAIR SEEDS
-    # --------------------------------------------------------
+    # ========================================================
 
-    server_seed = secrets.token_hex(32)
-    client_seed = secrets.token_hex(16)
+    server_seed = secrets.token_hex(
+        32
+    )
+
+    client_seed = secrets.token_hex(
+        16
+    )
 
     public_hash = hashlib.sha256(
         server_seed.encode()
     ).hexdigest()
 
-    # --------------------------------------------------------
+    # ========================================================
     # OPENING MESSAGE
-    # --------------------------------------------------------
+    # ========================================================
 
     opening = emb(
         '🃏 Loot Packet',
         (
-            f'**{ctx.author.display_name}** opened a '
-            f'**Loot Packet**!\n\n'
+            f'**{ctx.author.display_name}** '
+            f'opened a mystery packet!\n\n'
 
             f'💰 **Bet:** '
             f'{money(amount)} points\n\n'
 
-            f'📦 **Opening mystery packet...**\n'
-            f'Please wait **3 seconds**...\n\n'
+            f'📦 Opening packet...\n'
+            f'🃏 🃏 🃏\n\n'
 
-            f'🃏 🃏 🃏'
+            f'Please wait **3 seconds**...'
         ),
         GREEN
     )
@@ -813,71 +1187,129 @@ async def lootpacket(
         embed=opening
     )
 
-    # --------------------------------------------------------
-    # WAIT 3 SECONDS
-    # --------------------------------------------------------
+    # ========================================================
+    # 3 SECOND REVEAL
+    # ========================================================
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(
+        3
+    )
 
-    # --------------------------------------------------------
-    # CREATE DECK
-    # --------------------------------------------------------
+    # ========================================================
+    # CARD PROBABILITIES
+    #
+    # A  = 10%
+    # K  = 10%
+    # Other 11 ranks share 80%
+    #
+    # Each normal rank = approximately 7.27%
+    # ========================================================
 
-    deck = [
-        (rank, suit)
-        for rank in LP_RANKS
-        for suit in LP_SUITS
-    ]
+    normal_rank_weight = (
+        80 / 11
+    )
 
-    random.shuffle(deck)
+    rank_weights = {
 
-    # --------------------------------------------------------
+        '2': normal_rank_weight,
+        '3': normal_rank_weight,
+        '4': normal_rank_weight,
+        '5': normal_rank_weight,
+
+        '6': normal_rank_weight,
+        '7': normal_rank_weight,
+        '8': normal_rank_weight,
+
+        '9': normal_rank_weight,
+        '10': normal_rank_weight,
+        'J': normal_rank_weight,
+        'Q': normal_rank_weight,
+
+        'K': 10,
+        'A': 10
+    }
+
+    # ========================================================
     # DRAW 3 CARDS
-    # --------------------------------------------------------
+    # ========================================================
 
-    cards = [
-        deck.pop(),
-        deck.pop(),
-        deck.pop()
-    ]
+    cards = []
 
-    # --------------------------------------------------------
-    # GET MULTIPLIERS
-    # --------------------------------------------------------
+    for _ in range(3):
 
-    multipliers = [
-        LP_MULTIPLIERS[card[0]]
-        for card in cards
-    ]
+        rank = random.choices(
+            list(
+                rank_weights.keys()
+            ),
+            weights=list(
+                rank_weights.values()
+            ),
+            k=1
+        )[0]
+
+        suit = random.choice(
+            LP_SUITS
+        )
+
+        cards.append(
+            (
+                rank,
+                suit
+            )
+        )
+
+    # ========================================================
+    # CALCULATE EACH CARD
+    # ========================================================
+
+    multipliers = []
+
+    for rank, suit in cards:
+
+        multipliers.append(
+            LP_MULTIPLIERS[
+                rank
+            ]
+        )
+
+    # ========================================================
+    # TOTAL MULTIPLIER
+    # ========================================================
 
     total_multiplier = sum(
         multipliers,
         Decimal('0.00')
     )
 
-    total_multiplier = total_multiplier.quantize(
-        Decimal('0.01')
+    total_multiplier = (
+        total_multiplier
+        .quantize(
+            Decimal('0.01')
+        )
     )
 
-    # --------------------------------------------------------
-    # CALCULATE PAYOUT
-    # --------------------------------------------------------
+    # ========================================================
+    # PAYOUT
+    # ========================================================
 
     payout = (
-        amount * total_multiplier
+        amount
+        * total_multiplier
     ).quantize(
         Decimal('0.01')
     )
 
-    # --------------------------------------------------------
-    # RESULT
-    # --------------------------------------------------------
+    # ========================================================
+    # WIN / LOSS
+    # ========================================================
 
-    won = payout > Decimal('0')
+    won = (
+        payout > Decimal('0')
+    )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PAY PLAYER
-    # --------------------------------------------------------
+    # ========================================================
 
     if payout > Decimal('0'):
 
@@ -886,47 +1318,70 @@ async def lootpacket(
             payout
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # RECORD GAME
-    # --------------------------------------------------------
+    # ========================================================
 
-    await db.record(
-        ctx.author.id,
-        'Loot Packet',
-        amount,
-        'win' if won else 'loss',
-        payout
-    )
+    try:
 
-    # --------------------------------------------------------
+        await db.record(
+            ctx.author.id,
+            'Loot Packet',
+            amount,
+            'win' if won else 'loss',
+            payout
+        )
+
+    except Exception as e:
+
+        print(
+            f'Loot Packet DB error: {e}'
+        )
+
+    # ========================================================
     # PUBLIC WIN LOG
-    # --------------------------------------------------------
+    # ========================================================
 
     if won:
 
         try:
+
             await announce_game_win(
                 ctx.author,
                 payout
             )
+
         except Exception as e:
+
             print(
                 f'Loot Packet win log error: {e}'
             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # CARD TEXT
-    # --------------------------------------------------------
+    # ========================================================
+
+    suit_symbols = {
+        'S': '♠',
+        'H': '♥',
+        'D': '♦',
+        'C': '♣'
+    }
 
     card_lines = []
 
-    for card, multiplier in zip(
+    for (
+        card,
+        multiplier
+    ) in zip(
         cards,
         multipliers
     ):
 
+        rank, suit = card
+
         card_lines.append(
-            f'{lp_card_name(card)} '
+            f'**{rank}{suit_symbols[suit]}** '
             f'— `{multiplier:.2f}x`'
         )
 
@@ -934,52 +1389,31 @@ async def lootpacket(
         card_lines
     )
 
-    # --------------------------------------------------------
-    # RESULT TEXT
-    # --------------------------------------------------------
+    # ========================================================
+    # RESULT MESSAGE
+    # ========================================================
 
-    if total_multiplier > Decimal('0'):
+    if won:
 
-        result_text = (
+        result_message = (
             f'🎉 **You received '
             f'{money(payout)} points!**'
         )
 
-        result_colour = GREEN
+        result_color = GREEN
 
     else:
 
-        result_text = (
-            '💀 **No winning cards. Better luck next time!**'
+        result_message = (
+            '💀 **No winning cards. '
+            'Better luck next time!**'
         )
 
-        result_colour = RED
+        result_color = RED
 
-    # --------------------------------------------------------
-    # CREATE CARD IMAGE
-    #
-    # Uses the SAME blackjack card renderer
-    # --------------------------------------------------------
-
-    image_path = None
-
-    try:
-
-        image_path = blackjack_card(
-            ctx.author.display_name,
-            cards,
-            []
-        )
-
-    except Exception as e:
-
-        print(
-            f'Loot Packet image error: {e}'
-        )
-
-    # --------------------------------------------------------
+    # ========================================================
     # FINAL EMBED
-    # --------------------------------------------------------
+    # ========================================================
 
     result_embed = emb(
         '🃏 Loot Packet — Result',
@@ -990,7 +1424,7 @@ async def lootpacket(
             f'🎴 **Cards Drawn**\n'
             f'{card_text}\n\n'
 
-            f'━━━━━━━━━━━━━━━━━━\n'
+            f'━━━━━━━━━━━━━━━━━━\n\n'
 
             f'**Total Multiplier:** '
             f'`{total_multiplier:.2f}x`\n'
@@ -998,21 +1432,42 @@ async def lootpacket(
             f'**Payout:** '
             f'`{money(payout)} points`\n\n'
 
-            f'{result_text}\n\n'
+            f'{result_message}\n\n'
 
             f'🔒 **Provably Fair**\n'
             f'Public Hash: `{public_hash}`\n'
             f'Server Seed: `{server_seed}`\n'
             f'Client Seed: `{client_seed}`'
         ),
-        result_colour
+        result_color
     )
 
-    # --------------------------------------------------------
-    # ATTACH RESULT IMAGE
-    # --------------------------------------------------------
+    # ========================================================
+    # CREATE ACTUAL 3-CARD IMAGE
+    # ========================================================
 
-    if image_path:
+    image_path = None
+
+    try:
+
+        image_path = create_lootpacket_image(
+            cards,
+            ctx.author.display_name
+        )
+
+    except Exception as e:
+
+        print(
+            f'Loot Packet image creation error: {e}'
+        )
+
+    # ========================================================
+    # SEND RESULT
+    # ========================================================
+
+    if image_path and os.path.isfile(
+        image_path
+    ):
 
         try:
 
@@ -1027,7 +1482,9 @@ async def lootpacket(
 
             await message.edit(
                 embed=result_embed,
-                attachments=[file]
+                attachments=[
+                    file
+                ]
             )
 
             return
@@ -1035,17 +1492,16 @@ async def lootpacket(
         except Exception as e:
 
             print(
-                f'Loot Packet attachment error: {e}'
+                f'Loot Packet image send error: {e}'
             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # FALLBACK WITHOUT IMAGE
-    # --------------------------------------------------------
+    # ========================================================
 
     await message.edit(
         embed=result_embed
     )
-    
 @bot.command(aliases=['depo'])
 async def deposit(ctx):
     xpub = os.getenv('LTC_XPUB')
