@@ -696,6 +696,356 @@ async def limbo(ctx, amount: Decimal, target: Decimal):
 # DEPOSIT SYSTEM
 # ============================================================
 
+# ============================================================
+# LOOT PACKET
+# ============================================================
+
+LP_RANKS = [
+    '2', '3', '4', '5',
+    '6', '7', '8',
+    '9', '10', 'J', 'Q',
+    'K', 'A'
+]
+
+LP_SUITS = ['S', 'H', 'D', 'C']
+
+
+# ------------------------------------------------------------
+# PAYOUT MULTIPLIERS
+# ------------------------------------------------------------
+
+LP_MULTIPLIERS = {
+    '2': Decimal('0.00'),
+    '3': Decimal('0.00'),
+    '4': Decimal('0.00'),
+    '5': Decimal('0.00'),
+
+    '6': Decimal('0.50'),
+    '7': Decimal('0.50'),
+    '8': Decimal('0.50'),
+
+    '9': Decimal('1.40'),
+    '10': Decimal('1.40'),
+    'J': Decimal('1.40'),
+    'Q': Decimal('1.40'),
+
+    'K': Decimal('2.00'),
+
+    'A': Decimal('3.00')
+}
+
+
+# ------------------------------------------------------------
+# CARD DISPLAY
+# ------------------------------------------------------------
+
+LP_SUIT_NAMES = {
+    'S': '♠',
+    'H': '♥',
+    'D': '♦',
+    'C': '♣'
+}
+
+
+def lp_card_name(card):
+    rank, suit = card
+
+    return (
+        f'**{rank}{LP_SUIT_NAMES[suit]}**'
+    )
+
+
+# ============================================================
+# LOOT PACKET COMMAND
+# ============================================================
+
+@bot.command(
+    aliases=['lp']
+)
+async def lootpacket(
+    ctx,
+    amount: Decimal
+):
+
+    # --------------------------------------------------------
+    # CHECK BET
+    # --------------------------------------------------------
+
+    if not await require_game(
+        ctx,
+        amount
+    ):
+        return
+
+    # --------------------------------------------------------
+    # PROVABLY FAIR SEEDS
+    # --------------------------------------------------------
+
+    server_seed = secrets.token_hex(32)
+    client_seed = secrets.token_hex(16)
+
+    public_hash = hashlib.sha256(
+        server_seed.encode()
+    ).hexdigest()
+
+    # --------------------------------------------------------
+    # OPENING MESSAGE
+    # --------------------------------------------------------
+
+    opening = emb(
+        '🃏 Loot Packet',
+        (
+            f'**{ctx.author.display_name}** opened a '
+            f'**Loot Packet**!\n\n'
+
+            f'💰 **Bet:** '
+            f'{money(amount)} points\n\n'
+
+            f'📦 **Opening mystery packet...**\n'
+            f'Please wait **3 seconds**...\n\n'
+
+            f'🃏 🃏 🃏'
+        ),
+        GREEN
+    )
+
+    message = await ctx.send(
+        embed=opening
+    )
+
+    # --------------------------------------------------------
+    # WAIT 3 SECONDS
+    # --------------------------------------------------------
+
+    await asyncio.sleep(3)
+
+    # --------------------------------------------------------
+    # CREATE DECK
+    # --------------------------------------------------------
+
+    deck = [
+        (rank, suit)
+        for rank in LP_RANKS
+        for suit in LP_SUITS
+    ]
+
+    random.shuffle(deck)
+
+    # --------------------------------------------------------
+    # DRAW 3 CARDS
+    # --------------------------------------------------------
+
+    cards = [
+        deck.pop(),
+        deck.pop(),
+        deck.pop()
+    ]
+
+    # --------------------------------------------------------
+    # GET MULTIPLIERS
+    # --------------------------------------------------------
+
+    multipliers = [
+        LP_MULTIPLIERS[card[0]]
+        for card in cards
+    ]
+
+    total_multiplier = sum(
+        multipliers,
+        Decimal('0.00')
+    )
+
+    total_multiplier = total_multiplier.quantize(
+        Decimal('0.01')
+    )
+
+    # --------------------------------------------------------
+    # CALCULATE PAYOUT
+    # --------------------------------------------------------
+
+    payout = (
+        amount * total_multiplier
+    ).quantize(
+        Decimal('0.01')
+    )
+
+    # --------------------------------------------------------
+    # RESULT
+    # --------------------------------------------------------
+
+    won = payout > Decimal('0')
+
+    # --------------------------------------------------------
+    # PAY PLAYER
+    # --------------------------------------------------------
+
+    if payout > Decimal('0'):
+
+        await db.balance(
+            ctx.author.id,
+            payout
+        )
+
+    # --------------------------------------------------------
+    # RECORD GAME
+    # --------------------------------------------------------
+
+    await db.record(
+        ctx.author.id,
+        'Loot Packet',
+        amount,
+        'win' if won else 'loss',
+        payout
+    )
+
+    # --------------------------------------------------------
+    # PUBLIC WIN LOG
+    # --------------------------------------------------------
+
+    if won:
+
+        try:
+            await announce_game_win(
+                ctx.author,
+                payout
+            )
+        except Exception as e:
+            print(
+                f'Loot Packet win log error: {e}'
+            )
+
+    # --------------------------------------------------------
+    # CARD TEXT
+    # --------------------------------------------------------
+
+    card_lines = []
+
+    for card, multiplier in zip(
+        cards,
+        multipliers
+    ):
+
+        card_lines.append(
+            f'{lp_card_name(card)} '
+            f'— `{multiplier:.2f}x`'
+        )
+
+    card_text = '\n'.join(
+        card_lines
+    )
+
+    # --------------------------------------------------------
+    # RESULT TEXT
+    # --------------------------------------------------------
+
+    if total_multiplier > Decimal('0'):
+
+        result_text = (
+            f'🎉 **You received '
+            f'{money(payout)} points!**'
+        )
+
+        result_colour = GREEN
+
+    else:
+
+        result_text = (
+            '💀 **No winning cards. Better luck next time!**'
+        )
+
+        result_colour = RED
+
+    # --------------------------------------------------------
+    # CREATE CARD IMAGE
+    #
+    # Uses the SAME blackjack card renderer
+    # --------------------------------------------------------
+
+    image_path = None
+
+    try:
+
+        image_path = blackjack_card(
+            ctx.author.display_name,
+            cards,
+            []
+        )
+
+    except Exception as e:
+
+        print(
+            f'Loot Packet image error: {e}'
+        )
+
+    # --------------------------------------------------------
+    # FINAL EMBED
+    # --------------------------------------------------------
+
+    result_embed = emb(
+        '🃏 Loot Packet — Result',
+        (
+            f'**Bet:** '
+            f'{money(amount)} points\n\n'
+
+            f'🎴 **Cards Drawn**\n'
+            f'{card_text}\n\n'
+
+            f'━━━━━━━━━━━━━━━━━━\n'
+
+            f'**Total Multiplier:** '
+            f'`{total_multiplier:.2f}x`\n'
+
+            f'**Payout:** '
+            f'`{money(payout)} points`\n\n'
+
+            f'{result_text}\n\n'
+
+            f'🔒 **Provably Fair**\n'
+            f'Public Hash: `{public_hash}`\n'
+            f'Server Seed: `{server_seed}`\n'
+            f'Client Seed: `{client_seed}`'
+        ),
+        result_colour
+    )
+
+    # --------------------------------------------------------
+    # ATTACH RESULT IMAGE
+    # --------------------------------------------------------
+
+    if image_path:
+
+        try:
+
+            file = discord.File(
+                image_path,
+                filename='lootpacket.png'
+            )
+
+            result_embed.set_image(
+                url='attachment://lootpacket.png'
+            )
+
+            await message.edit(
+                embed=result_embed,
+                attachments=[file]
+            )
+
+            return
+
+        except Exception as e:
+
+            print(
+                f'Loot Packet attachment error: {e}'
+            )
+
+    # --------------------------------------------------------
+    # FALLBACK WITHOUT IMAGE
+    # --------------------------------------------------------
+
+    await message.edit(
+        embed=result_embed
+    )
+    
 @bot.command(aliases=['depo'])
 async def deposit(ctx):
     xpub = os.getenv('LTC_XPUB')
