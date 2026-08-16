@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS deposits (
 
 
 -- ============================================================
--- MIGRATIONS FOR EXISTING DATABASES
+-- MIGRATIONS
 -- ============================================================
 
 ALTER TABLE users
@@ -165,8 +165,13 @@ WHERE id = 1;
 # POINT CONVERSION
 # ============================================================
 
-# 1 LTC = 10,000 points
-RATE = Decimal("0.0001")
+# $0.0045 USD = 1 point
+#
+# Therefore:
+#
+# $0.10 / $0.0045 = 22.22 points
+#
+USD_PER_POINT = Decimal("0.0045")
 
 
 # ============================================================
@@ -348,7 +353,8 @@ class Database:
                 UPDATE users
                 SET
                     balance = balance + $2,
-                    deposited_points = deposited_points + $2
+                    deposited_points =
+                        deposited_points + $2
                 WHERE user_id=$1
                 RETURNING balance
                 """,
@@ -607,7 +613,8 @@ class Database:
         txid: str,
         address: str,
         ltc_amount,
-        confirmations: int = 0
+        confirmations: int = 0,
+        ltc_usd_price=None
     ):
 
         required = int(
@@ -621,8 +628,49 @@ class Database:
             str(ltc_amount)
         )
 
+        if ltc <= 0:
+
+            raise ValueError(
+                "LTC amount must be greater than zero"
+            )
+
+        if ltc_usd_price is None:
+
+            raise ValueError(
+                "LTC/USD price is required"
+            )
+
+        ltc_usd_price = Decimal(
+            str(ltc_usd_price)
+        )
+
+        if ltc_usd_price <= 0:
+
+            raise ValueError(
+                "LTC/USD price must be greater than zero"
+            )
+
+        # ====================================================
+        # LTC -> USD
+        # ====================================================
+
+        usd_value = (
+            ltc * ltc_usd_price
+        )
+
+        # ====================================================
+        # USD -> POINTS
+        #
+        # $0.0045 = 1 point
+        #
+        # Example:
+        #
+        # $0.10 / $0.0045 = 22.22 points
+        #
+        # ====================================================
+
         points = (
-            ltc / RATE
+            usd_value / USD_PER_POINT
         ).quantize(
             Decimal("0.01")
         )
@@ -631,16 +679,17 @@ class Database:
 
             async with c.transaction():
 
-                # ------------------------------------------------
+                # =================================================
                 # CHECK IF TRANSACTION ALREADY EXISTS
-                # ------------------------------------------------
+                # =================================================
 
                 existing = await c.fetchrow(
                     """
                     SELECT
                         status,
                         confirmations,
-                        points
+                        points,
+                        ltc
                     FROM deposits
                     WHERE txid=$1
                     FOR UPDATE
@@ -648,13 +697,16 @@ class Database:
                     txid
                 )
 
-                # ------------------------------------------------
-                # ALREADY EXISTS
-                # ------------------------------------------------
+                # =================================================
+                # EXISTING DEPOSIT
+                # =================================================
 
                 if existing:
 
-                    # If already credited, don't credit again.
+                    # ---------------------------------------------
+                    # Already credited
+                    # ---------------------------------------------
+
                     if existing["status"] == "confirmed":
 
                         return {
@@ -664,38 +716,54 @@ class Database:
                             "points": existing["points"]
                         }
 
-                    # Update confirmation count.
+                    # ---------------------------------------------
+                    # Update pending deposit
+                    #
+                    # This also repairs deposits that were created
+                    # before the new USD conversion was installed.
+                    # ---------------------------------------------
+
                     await c.execute(
                         """
                         UPDATE deposits
-                        SET confirmations=$2
+                        SET
+                            confirmations=$2,
+                            points=$3,
+                            ltc=$4
                         WHERE txid=$1
                         """,
                         txid,
-                        confirmations
+                        confirmations,
+                        points,
+                        ltc
                     )
 
-                    # Not enough confirmations yet.
+                    # ---------------------------------------------
+                    # Not enough confirmations
+                    # ---------------------------------------------
+
                     if confirmations < required:
 
                         return {
                             "inserted": False,
                             "credited": False,
                             "already_credited": False,
-                            "points": existing["points"]
+                            "points": points
                         }
 
-                    # ------------------------------------------------
+                    # ---------------------------------------------
                     # CONFIRM EXISTING DEPOSIT
-                    # ------------------------------------------------
+                    # ---------------------------------------------
 
                     updated = await c.fetchrow(
                         """
                         UPDATE deposits
                         SET
                             confirmations=$2,
+                            points=$3,
+                            ltc=$4,
                             status='confirmed',
-                            credited_at=$3
+                            credited_at=$5
                         WHERE
                             txid=$1
                             AND status!='confirmed'
@@ -703,6 +771,8 @@ class Database:
                         """,
                         txid,
                         confirmations,
+                        points,
+                        ltc,
                         datetime.now(timezone.utc)
                     )
 
@@ -712,162 +782,4 @@ class Database:
                             "inserted": False,
                             "credited": False,
                             "already_credited": True,
-                            "points": existing["points"]
-                        }
-
-                    deposit_points = Decimal(
-                        str(updated["points"])
-                    )
-
-                    # Credit in SAME transaction.
-                    await c.execute(
-                        """
-                        INSERT INTO users(user_id)
-                        VALUES($1)
-                        ON CONFLICT DO NOTHING
-                        """,
-                        user_id
-                    )
-
-                    await c.execute(
-                        """
-                        UPDATE users
-                        SET
-                            balance = balance + $2,
-                            deposited_points =
-                                deposited_points + $2
-                        WHERE user_id=$1
-                        """,
-                        user_id,
-                        deposit_points
-                    )
-
-                    return {
-                        "inserted": False,
-                        "credited": True,
-                        "already_credited": False,
-                        "points": deposit_points
-                    }
-
-                # ------------------------------------------------
-                # NEW DEPOSIT
-                # ------------------------------------------------
-
-                await c.execute(
-                    """
-                    INSERT INTO deposits(
-                        user_id,
-                        txid,
-                        address,
-                        ltc,
-                        points,
-                        confirmations,
-                        status
-                    )
-                    VALUES(
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        $5,
-                        $6,
-                        $7
-                    )
-                    """,
-                    user_id,
-                    txid,
-                    address,
-                    ltc,
-                    points,
-                    confirmations,
-                    "pending"
-                )
-
-                # ------------------------------------------------
-                # ENOUGH CONFIRMATIONS
-                # ------------------------------------------------
-
-                if confirmations >= required:
-
-                    updated = await c.fetchrow(
-                        """
-                        UPDATE deposits
-                        SET
-                            status='confirmed',
-                            credited_at=$3
-                        WHERE
-                            txid=$1
-                            AND status!='confirmed'
-                        RETURNING points
-                        """,
-                        txid,
-                        confirmations,
-                        datetime.now(timezone.utc)
-                    )
-
-                    if updated:
-
-                        deposit_points = Decimal(
-                            str(updated["points"])
-                        )
-
-                        # Create user if necessary.
-                        await c.execute(
-                            """
-                            INSERT INTO users(user_id)
-                            VALUES($1)
-                            ON CONFLICT DO NOTHING
-                            """,
-                            user_id
-                        )
-
-                        # Credit deposit.
-                        await c.execute(
-                            """
-                            UPDATE users
-                            SET
-                                balance = balance + $2,
-                                deposited_points =
-                                    deposited_points + $2
-                            WHERE user_id=$1
-                            """,
-                            user_id,
-                            deposit_points
-                        )
-
-                        return {
-                            "inserted": True,
-                            "credited": True,
-                            "already_credited": False,
-                            "points": deposit_points
-                        }
-
-                # ------------------------------------------------
-                # STILL PENDING
-                # ------------------------------------------------
-
-                return {
-                    "inserted": True,
-                    "credited": False,
-                    "already_credited": False,
-                    "points": points
-                }
-
-
-    # ========================================================
-    # LIST ALL WATCHED DEPOSIT ADDRESSES
-    # ========================================================
-
-    async def list_watched_addresses(self):
-
-        async with self.pool.acquire() as c:
-
-            return await c.fetch(
-                """
-                SELECT
-                    user_id,
-                    deposit_address
-                FROM users
-                WHERE deposit_address IS NOT NULL
-                """
-            )
+                          
