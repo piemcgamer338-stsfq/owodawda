@@ -267,6 +267,28 @@ class HelpSelect(discord.ui.Select):
                 "🔤 `.word` — Guess the hidden word"
             )
         }
+        @bot.command()
+async def help(ctx):
+    total = await db.pool.fetchval(
+        'SELECT COUNT(*) FROM users'
+    )
+
+    await ctx.send(
+        embed=emb(
+            'ℹ️ Help Command - Main Menu',
+            (
+                'Welcome to **LiteBet**, the Discord Litecoin Casino Bot.\n'
+                '💡 New here? Read `.guide`\n\n'
+                '**Rate:** 1 point = 0.0001 LTC\n'
+                '**Total Commands:** 40+\n'
+                f'**Total Users:** {total}\n\n'
+                '> Bot made by meow2004yr'
+            ),
+            GREEN
+        ),
+        view=HelpView()
+    )
+    
 
         category = self.values[0]
 
