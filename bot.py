@@ -902,15 +902,15 @@ async def race(ctx):
 # Only administrators can use this command.
 # ============================================================
 
-@bot.command()
+# ============================================================
+# .LBRESET
+# ============================================================
+
+@bot.command(name="lbreset")
 @commands.has_permissions(administrator=True)
 async def lbreset(ctx):
 
     try:
-
-        # ====================================================
-        # RESET ALL WAGERS
-        # ====================================================
 
         await db.pool.execute(
             """
@@ -918,10 +918,6 @@ async def lbreset(ctx):
             SET wagered = 0
             """
         )
-
-        # ====================================================
-        # CONFIRMATION
-        # ====================================================
 
         await ctx.send(
             embed=emb(
@@ -931,7 +927,7 @@ async def lbreset(ctx):
                     "**completely reset**.\n\n"
                     "All player wager amounts are now "
                     "**0 points**.\n\n"
-                    "The new race has started!"
+                    "A new wager race has started!"
                 ),
                 GREEN
             )
@@ -939,15 +935,13 @@ async def lbreset(ctx):
 
     except Exception as e:
 
-        print(
-            f"LB reset error: {e}"
-        )
+        print(f"LBReset error: {e}")
 
         await ctx.send(
             embed=emb(
-                "Leaderboard Reset Error",
+                "❌ Reset Failed",
                 (
-                    "I could not reset the wager leaderboard.\n\n"
+                    "I couldn't reset the wager leaderboard.\n\n"
                     f"`{e}`"
                 ),
                 RED
@@ -955,6 +949,31 @@ async def lbreset(ctx):
         )
 
 
+# ============================================================
+# LBRESET PERMISSION ERROR
+# ============================================================
+
+@lbreset.error
+async def lbreset_error(ctx, error):
+
+    if isinstance(
+        error,
+        commands.MissingPermissions
+    ):
+
+        await ctx.send(
+            embed=emb(
+                "❌ Permission Denied",
+                "You need **Administrator** permission to use `.lbreset`.",
+                RED
+            )
+        )
+
+    else:
+
+        print(
+            f"lbreset command error: {error}"
+        )
 # ============================================================
 # LBRESET PERMISSION ERROR
 # ============================================================
