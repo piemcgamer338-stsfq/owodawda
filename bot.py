@@ -181,6 +181,10 @@ class HiloView(discord.ui.View):
             mult=Decimal('1')+Decimal(self.streak)*Decimal('.20'); await db.record(self.author_id,'Hi-Lo',self.amount,'win',(self.amount*mult).quantize(Decimal('.01')))
             await self.message.edit(embed=result_embed('Hi-Lo',self.amount,True,mult,'Auto-cashed out after timeout.'),view=None)
 
+# ============================================================
+# HELP SELECT
+# ============================================================
+
 class HelpSelect(discord.ui.Select):
 
     def __init__(self):
@@ -267,29 +271,6 @@ class HelpSelect(discord.ui.Select):
                 "🔤 `.word` — Guess the hidden word"
             )
         }
-        
-        @bot.command()
-async def help(ctx):
-    total = await db.pool.fetchval(
-        'SELECT COUNT(*) FROM users'
-    )
-
-    await ctx.send(
-        embed=emb(
-            'ℹ️ Help Command - Main Menu',
-            (
-                'Welcome to **LiteBet**, the Discord Litecoin Casino Bot.\n'
-                '💡 New here? Read `.guide`\n\n'
-                '**Rate:** 1 point = 0.0001 LTC\n'
-                '**Total Commands:** 40+\n'
-                f'**Total Users:** {total}\n\n'
-                '> Bot made by meow2004yr'
-            ),
-            GREEN
-        ),
-        view=HelpView()
-    )
-    
 
         category = self.values[0]
 
@@ -303,14 +284,64 @@ async def help(ctx):
         )
 
 
+# ============================================================
+# HELP VIEW
+# ============================================================
+
 class HelpView(discord.ui.View):
 
     def __init__(self):
 
-        super().__init__(timeout=180)
+        super().__init__(
+            timeout=180
+        )
 
         self.add_item(
             HelpSelect()
+        )
+
+
+# ============================================================
+# HELP COMMAND
+# ============================================================
+
+@bot.command()
+async def help(ctx):
+
+    try:
+
+        total = await db.pool.fetchval(
+            "SELECT COUNT(*) FROM users"
+        )
+
+        await ctx.send(
+            embed=emb(
+                "ℹ️ Help Command - Main Menu",
+                (
+                    "Welcome to **LiteBet**, the Discord Litecoin Casino Bot.\n"
+                    "💡 New here? Read `.guide`\n\n"
+                    "**Rate:** 1 point = 0.0001 LTC\n"
+                    "**Total Commands:** 40+\n"
+                    f"**Total Users:** {total}\n\n"
+                    "> Bot made by meow2004yr"
+                ),
+                GREEN
+            ),
+            view=HelpView()
+        )
+
+    except Exception as e:
+
+        print(
+            f"Help command error: {e}"
+        )
+
+        await ctx.send(
+            embed=emb(
+                "Help Error",
+                "Something went wrong while opening the help menu.",
+                RED
+            )
         )
 
 class RainView(discord.ui.View):
