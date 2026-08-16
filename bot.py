@@ -2595,15 +2595,22 @@ class MinesView(discord.ui.View):
         client,
         public_hash
     ):
+        # 20 tiles + 1 cashout button = 21 components
         super().__init__(timeout=120)
 
         self.author_id = author_id
         self.amount = amount
         self.bombs = bombs
-        self.safe_tiles = 25 - bombs
+
+        # 20 total tiles
+        self.total_tiles = 20
+        self.safe_tiles = self.total_tiles - bombs
 
         self.mines = set(
-            random.sample(range(25), bombs)
+            random.sample(
+                range(self.total_tiles),
+                bombs
+            )
         )
 
         self.revealed_tiles = set()
@@ -2617,10 +2624,11 @@ class MinesView(discord.ui.View):
         self.finished = False
 
         # ----------------------------------------------------
-        # 5 x 5 BOARD
+        # 20 TILE BOARD
+        # 4 ROWS x 5 TILES
         # ----------------------------------------------------
 
-        for i in range(25):
+        for i in range(self.total_tiles):
 
             button = discord.ui.Button(
                 label='?',
@@ -2632,6 +2640,23 @@ class MinesView(discord.ui.View):
             button.callback = self.pick
 
             self.add_item(button)
+
+        # ----------------------------------------------------
+        # CASH OUT BUTTON
+        # ROW 5
+        # ----------------------------------------------------
+
+        cashout_button = discord.ui.Button(
+            label='Cash Out',
+            emoji='💰',
+            style=discord.ButtonStyle.success,
+            row=4,
+            custom_id='mine:cashout'
+        )
+
+        cashout_button.callback = self.cashout
+
+        self.add_item(cashout_button)
 
     # ========================================================
     # MULTIPLIER
@@ -2647,7 +2672,7 @@ class MinesView(discord.ui.View):
         for i in range(self.revealed):
 
             remaining_safe = self.safe_tiles - i
-            remaining_tiles = 25 - i
+            remaining_tiles = self.total_tiles - i
 
             if remaining_safe <= 0:
                 break
@@ -2671,7 +2696,8 @@ class MinesView(discord.ui.View):
 
         rows = []
 
-        for row in range(5):
+        # 4 x 5 board
+        for row in range(4):
 
             cells = []
 
@@ -2683,7 +2709,6 @@ class MinesView(discord.ui.View):
 
                     if index in self.mines:
                         cells.append(MINES_BOMB)
-
                     else:
                         cells.append(MINES_DIAMOND)
 
@@ -2708,8 +2733,7 @@ class MinesView(discord.ui.View):
         if extra is None:
 
             extra = (
-                'Choose a tile to reveal a diamond.\n\n'
-                '💰 React with the money bag to cash out.'
+                'Choose a tile to reveal a diamond.'
             )
 
         multiplier = self.multiplier()
@@ -2737,6 +2761,9 @@ class MinesView(discord.ui.View):
                 f'{self.grid_text()}\n\n'
 
                 f'{extra}\n\n'
+
+                f'💰 **Use the Cash Out button '
+                f'to collect your winnings.**\n\n'
 
                 f'🔒 **Provably Fair**\n'
                 f'Public Hash: `{self.public_hash}`'
@@ -2798,10 +2825,14 @@ class MinesView(discord.ui.View):
             )
 
             if button is None:
-                return
+
+                return await interaction.response.send_message(
+                    '❌ This tile is no longer available.',
+                    ephemeral=True
+                )
 
             # ------------------------------------------------
-            # PREVENT DUPLICATE TILE
+            # ALREADY REVEALED
             # ------------------------------------------------
 
             if index in self.revealed_tiles:
@@ -2817,23 +2848,25 @@ class MinesView(discord.ui.View):
 
             if index in self.mines:
 
-                # Permanently end game
                 self.finished = True
                 self.stop()
 
-                # Remove from active games immediately
                 ACTIVE_MINES.pop(
                     interaction.message.id,
                     None
                 )
 
                 # ------------------------------------------------
-                # REVEAL ENTIRE BOARD
+                # REVEAL EVERYTHING
                 # ------------------------------------------------
 
                 for x in self.children:
 
                     x.disabled = True
+
+                    # Cashout button
+                    if x.custom_id == 'mine:cashout':
+                        continue
 
                     tile_index = int(
                         x.custom_id.split(':')[1]
@@ -2841,20 +2874,20 @@ class MinesView(discord.ui.View):
 
                     if tile_index in self.mines:
 
-                        x.label = 'BOMB'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = '💣'
                         x.style = discord.ButtonStyle.danger
 
                     elif tile_index in self.revealed_tiles:
 
-                        x.label = 'GEM'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = '💎'
                         x.style = discord.ButtonStyle.success
 
                     else:
 
                         x.label = ''
-                        x.emoji = None
+                        x.emoji = '💎'
                         x.style = discord.ButtonStyle.secondary
 
                 # ------------------------------------------------
@@ -2875,8 +2908,8 @@ class MinesView(discord.ui.View):
                         f'{self.bombs} {MINES_BOMB} | '
                         f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
-                        f'💥 **You lost!**\n'
-                        f'You hit a mine.\n\n'
+                        f'💥 **You hit a mine!**\n'
+                        f'**The game has ended.**\n\n'
 
                         f'🔒 **Provably Fair:**\n'
                         f'• **Public Hash:** '
@@ -2891,19 +2924,14 @@ class MinesView(discord.ui.View):
                     RED
                 )
 
-                # ------------------------------------------------
-                # RESPOND TO DISCORD FIRST
-                # ------------------------------------------------
-
+                # IMPORTANT:
+                # Respond to Discord FIRST.
                 await interaction.response.edit_message(
                     embed=loss_embed,
                     view=self
                 )
 
-                # ------------------------------------------------
-                # DATABASE AFTER RESPONSE
-                # ------------------------------------------------
-
+                # DB AFTER RESPONSE
                 try:
 
                     await db.record(
@@ -2927,12 +2955,11 @@ class MinesView(discord.ui.View):
             # =================================================
 
             self.revealed += 1
-
             self.revealed_tiles.add(index)
 
             button.disabled = True
-            button.label = 'GEM'
-            button.emoji = None
+            button.label = ''
+            button.emoji = '💎'
             button.style = discord.ButtonStyle.success
 
             # =================================================
@@ -2955,13 +2982,13 @@ class MinesView(discord.ui.View):
                     None
                 )
 
-                # ------------------------------------------------
-                # REVEAL ENTIRE BOARD
-                # ------------------------------------------------
-
+                # Reveal entire board
                 for x in self.children:
 
                     x.disabled = True
+
+                    if x.custom_id == 'mine:cashout':
+                        continue
 
                     tile_index = int(
                         x.custom_id.split(':')[1]
@@ -2969,18 +2996,18 @@ class MinesView(discord.ui.View):
 
                     if tile_index in self.mines:
 
-                        x.label = 'BOMB'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = '💣'
                         x.style = discord.ButtonStyle.danger
 
                     else:
 
-                        x.label = 'GEM'
-                        x.emoji = None
+                        x.label = ''
+                        x.emoji = '💎'
                         x.style = discord.ButtonStyle.success
 
                 # ------------------------------------------------
-                # WIN EMBED
+                # WIN
                 # ------------------------------------------------
 
                 win_embed = emb(
@@ -3013,13 +3040,11 @@ class MinesView(discord.ui.View):
                     GREEN
                 )
 
-                # Respond FIRST
                 await interaction.response.edit_message(
                     embed=win_embed,
                     view=self
                 )
 
-                # Database AFTER response
                 try:
 
                     await db.record(
@@ -3047,9 +3072,9 @@ class MinesView(discord.ui.View):
             await interaction.response.edit_message(
                 embed=self.game_embed(
                     (
-                        f'💎 **Diamond found!**\n'
+                        f'{MINES_DIAMOND} **Diamond found!**\n'
                         f'You can cash out at '
-                        f'`{multiplier:.2f}x` using 💰.'
+                        f'`{multiplier:.2f}x`.'
                     )
                 ),
                 view=self
@@ -3075,34 +3100,29 @@ class MinesView(discord.ui.View):
                     pass
 
     # ========================================================
-    # REACTION CASHOUT
+    # CASH OUT BUTTON
     # ========================================================
 
-    async def reaction_cashout(self, user):
+    async def cashout(self, interaction):
 
         if self.finished:
-            return
 
-        if user.id != self.author_id:
-            return
+            return await interaction.response.send_message(
+                '❌ This Mines game has already ended.',
+                ephemeral=True
+            )
 
         # ----------------------------------------------------
-        # MUST REVEAL AT LEAST ONE DIAMOND
+        # MUST REVEAL AT LEAST ONE
         # ----------------------------------------------------
 
         if self.revealed <= 0:
 
-            try:
-
-                await self.message.remove_reaction(
-                    '💰',
-                    user
-                )
-
-            except Exception:
-                pass
-
-            return
+            return await interaction.response.send_message(
+                '💎 Reveal at least one diamond before '
+                'cashing out.',
+                ephemeral=True
+            )
 
         # ----------------------------------------------------
         # END GAME
@@ -3118,15 +3138,16 @@ class MinesView(discord.ui.View):
         ).quantize(Decimal('0.01'))
 
         ACTIVE_MINES.pop(
-            self.message.id,
+            interaction.message.id,
             None
         )
 
         # ----------------------------------------------------
-        # DISABLE BOARD
+        # DISABLE EVERYTHING
         # ----------------------------------------------------
 
         for x in self.children:
+
             x.disabled = True
 
         # ----------------------------------------------------
@@ -3149,7 +3170,7 @@ class MinesView(discord.ui.View):
                 f'{self.safe_tiles} {MINES_DIAMOND}\n\n'
 
                 f'💎 **Diamonds Found:** '
-                f'**{self.revealed}**\n'
+                f'**{self.revealed}**\n\n'
 
                 f'💰 **Cashed out successfully!**\n\n'
 
@@ -3169,25 +3190,15 @@ class MinesView(discord.ui.View):
             GREEN
         )
 
-        # ----------------------------------------------------
-        # EDIT MESSAGE
-        # ----------------------------------------------------
-
-        try:
-
-            await self.message.edit(
-                embed=cashout_embed,
-                view=self
-            )
-
-        except Exception as e:
-
-            print(
-                f'Mines cashout message error: {e}'
-            )
+        # IMPORTANT:
+        # Respond immediately to the button interaction.
+        await interaction.response.edit_message(
+            embed=cashout_embed,
+            view=self
+        )
 
         # ----------------------------------------------------
-        # DATABASE
+        # DATABASE AFTER RESPONSE
         # ----------------------------------------------------
 
         try:
@@ -3205,20 +3216,6 @@ class MinesView(discord.ui.View):
             print(
                 f'Mines cashout DB error: {e}'
             )
-
-        # ----------------------------------------------------
-        # REMOVE USER REACTION
-        # ----------------------------------------------------
-
-        try:
-
-            await self.message.remove_reaction(
-                '💰',
-                user
-            )
-
-        except Exception:
-            pass
 
     # ========================================================
     # TIMEOUT
@@ -3239,11 +3236,9 @@ class MinesView(discord.ui.View):
                 None
             )
 
-        # ----------------------------------------------------
-        # DISABLE BOARD
-        # ----------------------------------------------------
-
+        # Disable all buttons
         for x in self.children:
+
             x.disabled = True
 
         if not self.message:
@@ -3356,80 +3351,6 @@ class MinesView(discord.ui.View):
 
 
 # ============================================================
-# MINES CASHOUT REACTION
-# ============================================================
-
-@bot.event
-async def on_raw_reaction_add(payload):
-
-    # Ignore bot reactions
-    if bot.user and payload.user_id == bot.user.id:
-        return
-
-    # Only 💰
-    if str(payload.emoji) != '💰':
-        return
-
-    # Find active Mines game
-    view = ACTIVE_MINES.get(
-        payload.message_id
-    )
-
-    if not isinstance(view, MinesView):
-        return
-
-    # Get user
-    user = bot.get_user(
-        payload.user_id
-    )
-
-    if user is None:
-
-        try:
-
-            user = await bot.fetch_user(
-                payload.user_id
-            )
-
-        except Exception:
-            return
-
-    # --------------------------------------------------------
-    # ONLY THE PLAYER CAN CASH OUT
-    # --------------------------------------------------------
-
-    if user.id != view.author_id:
-
-        try:
-
-            channel = bot.get_channel(
-                payload.channel_id
-            )
-
-            if channel:
-
-                message = await channel.fetch_message(
-                    payload.message_id
-                )
-
-                await message.remove_reaction(
-                    payload.emoji,
-                    user
-                )
-
-        except Exception:
-            pass
-
-        return
-
-    # --------------------------------------------------------
-    # CASH OUT
-    # --------------------------------------------------------
-
-    await view.reaction_cashout(user)
-
-
-# ============================================================
 # MINES COMMAND
 # ============================================================
 
@@ -3440,23 +3361,17 @@ async def mines(
     bombs: int = 4
 ):
 
-    # --------------------------------------------------------
-    # VALIDATE BOMBS
-    # --------------------------------------------------------
-
-    if bombs < 1 or bombs > 20:
+    # 20 tiles means maximum 19 bombs
+    # because at least 1 diamond must exist.
+    if bombs < 1 or bombs > 19:
 
         return await ctx.send(
             embed=emb(
                 'Invalid mine count',
-                'Choose from **1 to 20 bombs**.',
+                'Choose from **1 to 19 bombs**.',
                 RED
             )
         )
-
-    # --------------------------------------------------------
-    # CHECK GAME REQUIREMENTS
-    # --------------------------------------------------------
 
     if not await require_game(
         ctx,
@@ -3465,13 +3380,13 @@ async def mines(
         return
 
     # --------------------------------------------------------
-    # GENERATE SEEDS
+    # SEEDS
     # --------------------------------------------------------
 
     server, client, public_hash = seed()
 
     # --------------------------------------------------------
-    # CREATE VIEW
+    # CREATE GAME
     # --------------------------------------------------------
 
     view = MinesView(
@@ -3495,24 +3410,10 @@ async def mines(
     view.message = message
 
     # --------------------------------------------------------
-    # SAVE ACTIVE GAME
+    # ACTIVE GAME
     # --------------------------------------------------------
 
     ACTIVE_MINES[message.id] = view
-
-    # --------------------------------------------------------
-    # CASHOUT REACTION
-    # --------------------------------------------------------
-
-    try:
-
-        await message.add_reaction('💰')
-
-    except Exception as e:
-
-        print(
-            f'Mines reaction error: {e}'
-        )
 @bot.command()
 async def rps(ctx, member: discord.Member, amount: Decimal):
     if member.bot or member==ctx.author or amount<=0: return await ctx.send(embed=emb('Invalid challenge','Choose another member and a positive bet.',RED))
