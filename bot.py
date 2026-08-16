@@ -182,82 +182,89 @@ class HiloView(discord.ui.View):
             await self.message.edit(embed=result_embed('Hi-Lo',self.amount,True,mult,'Auto-cashed out after timeout.'),view=None)
 
 class HelpSelect(discord.ui.Select):
+
     def __init__(self):
+
         super().__init__(
-            placeholder='Select a category',
+            placeholder="Select a category",
             options=[
                 discord.SelectOption(
-                    label='Admin',
-                    emoji='🛠️'
+                    label="Admin",
+                    emoji="🛠️",
+                    description="Administrative commands"
                 ),
                 discord.SelectOption(
-                    label='Utility',
-                    emoji='🧰'
+                    label="Utility",
+                    emoji="🧰",
+                    description="Useful bot commands"
                 ),
                 discord.SelectOption(
-                    label='Balance',
-                    emoji='💰'
+                    label="Balance",
+                    emoji="💰",
+                    description="Balance and Litecoin commands"
                 ),
                 discord.SelectOption(
-                    label='Games',
-                    emoji='🎮'
+                    label="Games",
+                    emoji="🎮",
+                    description="Available casino games"
                 )
             ]
         )
 
-    async def callback(self, interaction):
+    async def callback(self, interaction: discord.Interaction):
 
         lists = {
-            'Admin': (
-                '⚙️ `.add` — Add points to a user\n'
-                '🗑️ `.remove` — Remove points from a user\n'
-                '💰 `.setbalance` — Set a user\'s balance\n'
-                '🔄 `.lbreset` — Reset the leaderboard\n'
-                '🎁 `.beg` — Give yourself a small random reward\n'
-                '📜 `.history` — View betting history\n'
-                '🔒 `.freeze` — Freeze the casino\n'
-                '🔓 `.unfreeze` — Unfreeze the casino'
+
+            "Admin": (
+                "⚙️ `.add` — Add points to a user\n"
+                "🗑️ `.remove` — Remove points from a user\n"
+                "💰 `.setbalance` — Set a user's balance\n"
+                "🔄 `.lbreset` — Reset the leaderboard\n"
+                "🎁 `.beg` — Give yourself a small random reward\n"
+                "📜 `.history` — View betting history\n"
+                "🔒 `.freeze` — Freeze the casino\n"
+                "🔓 `.unfreeze` — Unfreeze the casino"
             ),
 
-            'Utility': (
-                '📍 `.address` — View your deposit address\n'
-                '🎮 `.games` — View all available games\n'
-                '📖 `.guide` — Learn how to use LiteBet\n'
-                '🏆 `.leaderboard` — View the top players\n'
-                '🔐 `.privacy` — Toggle your profile privacy\n'
-                '⭐ `.rank` — View your current rank\n'
-                '📊 `.ranks` — View all ranks and requirements\n'
-                '🚨 `.report` — Report an issue or player\n'
-                '📈 `.stats` — View player statistics\n'
-                '🌎 `.worldtime` — View world time\n'
-                '⏱️ `.timer` — Start a timer\n'
-                '🧵 `.thread` — Create a thread'
+            "Utility": (
+                "📍 `.address` — View your deposit address\n"
+                "🎮 `.games` — View all available games\n"
+                "📖 `.guide` — Learn how to use LiteBet\n"
+                "🏆 `.leaderboard` — View the top players\n"
+                "🔐 `.privacy` — Toggle your profile privacy\n"
+                "⭐ `.rank` — View your current rank\n"
+                "📊 `.ranks` — View all ranks and requirements\n"
+                "🚨 `.report` — Report an issue or player\n"
+                "📈 `.stats` — View player statistics\n"
+                "🌎 `.worldtime` — View world time\n"
+                "⏱️ `.timer` — Start a timer\n"
+                "🧵 `.thread` — Create a thread"
             ),
 
-            'Balance': (
-                '💰 `.balance` — Check your point balance\n'
-                '🎁 `.daily` — Claim your daily reward\n'
-                '💎 `.deposit` — Get your Litecoin deposit address\n'
-                '📅 `.monthly` — Claim your monthly reward\n'
-                '🌧️ `.rain` — Send a point rain to the server\n'
-                '💸 `.rb` — Claim available rateback\n'
-                '💰 `.tip` — Tip points to another user\n'
-                '👑 `.vip` — View your VIP status\n'
-                '📆 `.weekly` — Claim your weekly reward\n'
-                '📤 `.withdraw` — Request a Litecoin withdrawal\n'
-                '💱 `.price` — View the current LTC price'
+            "Balance": (
+                "💰 `.balance` — Check your point balance\n"
+                "🎁 `.daily` — Claim your daily reward\n"
+                "💎 `.deposit` — Get your Litecoin deposit address\n"
+                "📅 `.monthly` — Claim your monthly reward\n"
+                "🌧️ `.rain` — Send a point rain to the server\n"
+                "💸 `.rb` — Claim available rateback\n"
+                "💰 `.tip` — Tip points to another user\n"
+                "👑 `.vip` — View your VIP status\n"
+                "📆 `.weekly` — Claim your weekly reward\n"
+                "📤 `.withdraw` — Request a Litecoin withdrawal\n"
+                "💱 `.price` — View the current LTC price"
             ),
 
-            'Games': (
-                '🃏 `.blackjack` / `.bj` — Play Blackjack against the dealer\n'
-                '🃏 `.ward` — Play the Ward card game\n'
-                '🎴 `.hilo` — Guess whether the next card is higher or lower\n'
-                '🪙 `.coinflip` / `.cf` — Flip a coin and test your luck\n'
-                '🚀 `.limbo` — Cash out before the multiplier crashes\n'
-                '💣 `.mines` — Reveal diamonds and avoid the bombs\n'
-                '🗼 `.tower` — Climb the tower and cash out before hitting a bomb\n'
-                '✊ `.rps` — Play Rock Paper Scissors\n'
-                '🔤 `.word` — Guess the hidden word'
+            "Games": (
+                "🃏 `.blackjack` / `.bj` — Play Blackjack against the dealer\n"
+                "🃏 `.ward` — Play the Ward card game\n"
+                "🎴 `.hilo` — Guess whether the next card is higher or lower\n"
+                "🪙 `.coinflip` / `.cf` — Flip a coin and test your luck\n"
+                "🚀 `.limbo` — Cash out before the multiplier crashes\n"
+                "💣 `.mines` — Reveal diamonds and avoid the bombs\n"
+                "🗼 `.tower` — Climb the tower and cash out before hitting a bomb\n"
+                "✊ `.rps` — Play Rock Paper Scissors\n"
+                "🔤 `.word` — Guess the hidden word"
             )
         }
 
@@ -265,15 +272,12 @@ class HelpSelect(discord.ui.Select):
 
         await interaction.response.edit_message(
             embed=emb(
-                f'LiteBet — {category}',
+                f"ℹ️ Help Command — {category}",
                 lists[category],
                 GREEN
             ),
             view=self.view
         )
-        await interaction.response.edit_message(embed=emb(f'ℹ️ Help Command — {self.values[0]}',lists[self.values[0]]),view=self.view)
-class HelpView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=180); self.add_item(HelpSelect())
 
 class RainView(discord.ui.View):
     def __init__(self, host_id, amount, seconds):
