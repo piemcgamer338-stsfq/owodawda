@@ -455,10 +455,28 @@ async def rb(ctx):
         )
     )
 
+ADD_ALLOWED_USER_ID = 1519015243710201927
+
+
+def add_allowed(ctx):
+    return ctx.author.id == ADD_ALLOWED_USER_ID
+
+
 @bot.command()
-@commands.check(admin)
+@commands.check(add_allowed)
 async def add(ctx, member: discord.Member, amount: Decimal):
-    await db.balance(member.id,amount); e=emb('Balance added',f'**{money(amount)} points** has been added to {member.mention}\'s balance.'); e.set_thumbnail(url=member.display_avatar.url); await ctx.send(embed=e)
+    await db.balance(member.id, amount)
+
+    e = emb(
+        'Balance added',
+        f'**{money(amount)} points** has been added to {member.mention}\'s balance.'
+    )
+
+    e.set_thumbnail(
+        url=member.display_avatar.url
+    )
+
+    await ctx.send(embed=e)
 @bot.command()
 @commands.check(admin)
 async def remove(ctx, member: discord.Member, amount: Decimal): await db.balance(member.id,-amount); await ctx.send(embed=emb('Balance removed',f'**{money(amount)} points** removed from {member.mention}.'))
